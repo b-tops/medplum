@@ -34,8 +34,8 @@ export async function initApp(): Promise<void> {
     cacheTime: 60000,
     autoBatchTime: 100,
     onUnauthenticated: () => {
-      if (window.location.pathname !== '/signin' && window.location.pathname !== '/oauth') {
-        window.location.href = '/signin?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+      if (window.location.pathname !== '/ui/signin' && window.location.pathname !== '/ui/oauth') {
+        window.location.href = '/ui/signin?next=' + encodeURIComponent(window.location.pathname + window.location.search);
       }
     },
   });

@@ -4,11 +4,11 @@ import { ValueSetAutocomplete, ValueSetAutocompleteProps } from '../ValueSetAuto
 
 export interface CodeInputProps extends Omit<ValueSetAutocompleteProps, 'defaultValue' | 'onChange'> {
   readonly defaultValue?: string;
-  readonly onChange?: (value: string | undefined) => void;
+  readonly onChange: ((value: string | undefined) => void) | undefined;
 }
 
 export function CodeInput(props: CodeInputProps): JSX.Element {
-  const { defaultValue, onChange, ...rest } = props;
+  const { defaultValue, onChange, withHelpText, ...rest } = props;
   const [value, setValue] = useState<string | undefined>(defaultValue);
 
   function handleChange(newValues: ValueSetExpansionContains[]): void {
@@ -20,7 +20,14 @@ export function CodeInput(props: CodeInputProps): JSX.Element {
     }
   }
 
-  return <ValueSetAutocomplete defaultValue={codeToValueSetElement(value)} onChange={handleChange} {...rest} />;
+  return (
+    <ValueSetAutocomplete
+      defaultValue={codeToValueSetElement(value)}
+      onChange={handleChange}
+      withHelpText={withHelpText ?? true}
+      {...rest}
+    />
+  );
 }
 
 function codeToValueSetElement(code: string | undefined): ValueSetExpansionContains | undefined {

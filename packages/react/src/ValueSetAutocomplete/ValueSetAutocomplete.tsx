@@ -1,7 +1,8 @@
+import { Group, Text } from '@mantine/core';
 import { ValueSetExpandParams } from '@medplum/core';
 import { ValueSetExpansionContains } from '@medplum/fhirtypes';
 import { useMedplum } from '@medplum/react-hooks';
-import { useCallback } from 'react';
+import { forwardRef, useCallback } from 'react';
 import {
   AsyncAutocomplete,
   AsyncAutocompleteOption,
@@ -14,6 +15,7 @@ export interface ValueSetAutocompleteProps
   readonly creatable?: boolean;
   readonly clearable?: boolean;
   readonly expandParams?: Partial<ValueSetExpandParams>;
+  readonly withHelpText?: boolean;
 }
 
 function toKey(element: ValueSetExpansionContains): string {
@@ -53,7 +55,7 @@ function createValue(input: string): ValueSetExpansionContains {
  */
 export function ValueSetAutocomplete(props: ValueSetAutocompleteProps): JSX.Element {
   const medplum = useMedplum();
-  const { binding, creatable, clearable, expandParams, ...rest } = props;
+  const { binding, creatable, clearable, expandParams, withHelpText, ...rest } = props;
 
   const loadValues = useCallback(
     async (input: string, signal: AbortSignal): Promise<ValueSetExpansionContains[]> => {
@@ -89,6 +91,24 @@ export function ValueSetAutocomplete(props: ValueSetAutocompleteProps): JSX.Elem
       toOption={toOption}
       loadOptions={loadValues}
       onCreate={createValue}
+      itemComponent={withHelpText ? ItemComponent : undefined}
     />
   );
 }
+
+const ItemComponent = forwardRef<HTMLDivElement, AsyncAutocompleteOption<ValueSetExpansionContains>>(
+  ({ label, resource, ...others }: AsyncAutocompleteOption<ValueSetExpansionContains>, ref) => {
+    return (
+      <div ref={ref} {...others}>
+        <Group wrap="nowrap">
+          <div>
+            <Text>{label}</Text>
+            <Text size="xs" c="dimmed">
+              {`${resource.system}#${resource.code}`}
+            </Text>
+          </div>
+        </Group>
+      </div>
+    );
+  }
+);

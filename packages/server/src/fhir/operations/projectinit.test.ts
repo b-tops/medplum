@@ -1,12 +1,18 @@
-import express from 'express';
-import { loadTestConfig } from '../../config';
-import { initApp, shutdownApp } from '../../app';
-import { initTestAuth } from '../../test.setup';
-import request from 'supertest';
 import { ContentType, createReference, isUUID } from '@medplum/core';
+import { Practitioner, Project } from '@medplum/fhirtypes';
 import { randomUUID } from 'crypto';
+import express from 'express';
+import { pwnedPassword } from 'hibp';
+import fetch from 'node-fetch';
+import request from 'supertest';
+import { initApp, shutdownApp } from '../../app';
 import { createUser } from '../../auth/newuser';
-import { Project } from '@medplum/fhirtypes';
+import { loadTestConfig } from '../../config';
+import { initTestAuth, setupPwnedPasswordMock, setupRecaptchaMock, withTestContext } from '../../test.setup';
+import { getSystemRepo } from '../repo';
+
+jest.mock('hibp');
+jest.mock('node-fetch');
 
 const app = express();
 
@@ -18,6 +24,13 @@ describe('Project $init', () => {
 
   afterAll(async () => {
     await shutdownApp();
+  });
+
+  beforeEach(() => {
+    (fetch as unknown as jest.Mock).mockClear();
+    (pwnedPassword as unknown as jest.Mock).mockClear();
+    setupPwnedPasswordMock(pwnedPassword as unknown as jest.Mock, 0);
+    setupRecaptchaMock(fetch as unknown as jest.Mock, true);
   });
 
   test('Success', async () => {
@@ -79,7 +92,7 @@ describe('Project $init', () => {
         parameter: [
           {
             name: 'owner',
-            valueString: createReference(owner).reference,
+            valueReference: createReference(owner),
           },
         ],
       });
@@ -89,6 +102,10 @@ describe('Project $init', () => {
   test('Requires owner to be User', async () => {
     const superAdminClientToken = await initTestAuth({ superAdmin: true });
     expect(superAdminClientToken).toBeDefined();
+
+    const doc = await withTestContext(() =>
+      getSystemRepo().createResource<Practitioner>({ resourceType: 'Practitioner' })
+    );
 
     const projectName = 'Test Init Project ' + randomUUID();
     const res = await request(app)
@@ -102,6 +119,10 @@ describe('Project $init', () => {
           {
             name: 'name',
             valueString: projectName,
+          },
+          {
+            name: 'owner',
+            valueReference: createReference(doc),
           },
         ],
       });
@@ -135,7 +156,7 @@ describe('Project $init', () => {
           },
           {
             name: 'owner',
-            valueString: createReference(owner).reference,
+            valueReference: createReference(owner),
           },
         ],
       });
@@ -205,5 +226,29 @@ describe('Project $init', () => {
         ],
       });
     expect(res.status).toBe(201);
+  });
+
+  test('Defaults to no owner if unspecified', async () => {
+    const accessToken = await initTestAuth();
+    expect(accessToken).toBeDefined();
+
+    const projectName = 'Test Init Project ' + randomUUID();
+    const res = await request(app)
+      .post(`/fhir/R4/Project/$init`)
+      .set('Authorization', 'Bearer ' + accessToken)
+      .set('Content-Type', ContentType.FHIR_JSON)
+      .set('X-Medplum', 'extended')
+      .send({
+        resourceType: 'Parameters',
+        parameter: [
+          {
+            name: 'name',
+            valueString: projectName,
+          },
+        ],
+      });
+    expect(res.status).toBe(201);
+    const project = res.body as Project;
+    expect(project.owner).toBeUndefined();
   });
 });

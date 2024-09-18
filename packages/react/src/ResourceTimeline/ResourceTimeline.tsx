@@ -1,6 +1,12 @@
 import { ActionIcon, Center, Group, Loader, Menu, ScrollArea, TextInput } from '@mantine/core';
 import { showNotification, updateNotification } from '@mantine/notifications';
-import { getReferenceString, MedplumClient, normalizeErrorString, ProfileResource } from '@medplum/core';
+import {
+  MedplumClient,
+  ProfileResource,
+  createReference,
+  getReferenceString,
+  normalizeErrorString,
+} from '@medplum/core';
 import {
   Attachment,
   AuditEvent,
@@ -79,10 +85,10 @@ export function ResourceTimeline<T extends Resource>(props: ResourceTimelineProp
    * See "sortByDateAndPriority()" for more details.
    */
   const sortAndSetItems = useCallback(
-    (newItmes: Resource[]): void => {
-      sortByDateAndPriority(newItmes, resource);
-      newItmes.reverse();
-      setItems(newItmes);
+    (newItems: Resource[]): void => {
+      sortByDateAndPriority(newItems, resource);
+      newItems.reverse();
+      setItems(newItems);
     },
     [resource]
   );
@@ -139,7 +145,7 @@ export function ResourceTimeline<T extends Resource>(props: ResourceTimelineProp
     } else {
       [resourceType, id] = props.value.reference?.split('/') as [ResourceType, string];
     }
-    loadTimelineResources(medplum, resourceType, id).then(handleBatchResponse).catch(console.log);
+    loadTimelineResources(medplum, resourceType, id).then(handleBatchResponse).catch(console.error);
   }, [medplum, props.value, loadTimelineResources, handleBatchResponse]);
 
   useEffect(() => loadTimeline(), [loadTimeline]);
@@ -156,7 +162,7 @@ export function ResourceTimeline<T extends Resource>(props: ResourceTimelineProp
     medplum
       .createResource(props.createCommunication(resource, sender, contentString))
       .then((result) => addResource(result))
-      .catch(console.log);
+      .catch(console.error);
   }
 
   /**
@@ -201,11 +207,11 @@ export function ResourceTimeline<T extends Resource>(props: ResourceTimelineProp
   }
 
   function onPin(communication: Communication): void {
-    setPriority(communication, 'stat').then(loadTimeline).catch(console.log);
+    setPriority(communication, 'stat').then(loadTimeline).catch(console.error);
   }
 
   function onUnpin(communication: Communication): void {
-    setPriority(communication, 'routine').then(loadTimeline).catch(console.log);
+    setPriority(communication, 'routine').then(loadTimeline).catch(console.error);
   }
 
   function onDetails(timelineItem: Resource): void {
@@ -293,6 +299,7 @@ export function ResourceTimeline<T extends Resource>(props: ResourceTimelineProp
                 <IconMessage size={16} />
               </ActionIcon>
               <AttachmentButton
+                securityContext={createReference(resource)}
                 onUpload={createMedia}
                 onUploadStart={onUploadStart}
                 onUploadProgress={onUploadProgress}

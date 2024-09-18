@@ -1,9 +1,9 @@
 import { GetCallerIdentityCommand, STSClient } from '@aws-sdk/client-sts';
 import { mockClient } from 'aws-sdk-client-mock';
-import fs from 'fs';
+import fs from 'node:fs';
 import { printConfigNotFound, printStackNotFound } from './utils';
 
-jest.mock('fs', () => ({
+jest.mock('node:fs', () => ({
   createReadStream: jest.fn(),
   existsSync: jest.fn(),
   mkdtempSync: jest.fn(() => '/tmp/'),
@@ -31,7 +31,7 @@ describe('Utils', () => {
 
     await printConfigNotFound('dev');
 
-    expect(console.log).toHaveBeenCalledWith('Config not found: dev');
+    expect(console.log).toHaveBeenCalledWith('Config not found: dev (medplum.dev.config.json)');
     expect(console.log).toHaveBeenCalledWith('No configs found');
   });
 
@@ -46,7 +46,7 @@ describe('Utils', () => {
 
     await printConfigNotFound('dev');
 
-    expect(console.log).toHaveBeenCalledWith('Config not found: dev');
+    expect(console.log).toHaveBeenCalledWith('Config not found: dev (medplum.dev.config.json)');
     expect(console.log).toHaveBeenCalledWith('Available configs:');
   });
 

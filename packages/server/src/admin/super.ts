@@ -1,5 +1,4 @@
 import {
-  accepted,
   allOk,
   badRequest,
   forbidden,
@@ -11,10 +10,9 @@ import { Request, Response, Router } from 'express';
 import { body, validationResult } from 'express-validator';
 import { asyncWrap } from '../async';
 import { setPassword } from '../auth/setpassword';
-import { getConfig } from '../config';
 import { AuthenticatedRequestContext, getAuthenticatedContext } from '../context';
 import { getDatabasePool } from '../database';
-import { AsyncJobExecutor } from '../fhir/operations/utils/asyncjobexecutor';
+import { sendAsyncResponse } from '../fhir/operations/utils/asyncjobexecutor';
 import { invalidRequest, sendOutcome } from '../fhir/outcomes';
 import { getSystemRepo } from '../fhir/repo';
 import * as dataMigrations from '../migrations/data';
@@ -37,7 +35,7 @@ superAdminRouter.post(
     requireSuperAdmin();
     requireAsync(req);
 
-    await sendAsyncResponse(req, res, () => rebuildR4ValueSets());
+    await sendAsyncResponse(req, res, async () => rebuildR4ValueSets());
   })
 );
 
@@ -223,7 +221,7 @@ superAdminRouter.post(
 
 export function requireSuperAdmin(): AuthenticatedRequestContext {
   const ctx = getAuthenticatedContext();
-  if (!ctx.login.superAdmin) {
+  if (!ctx.project.superAdmin) {
     throw new OperationOutcomeError(forbidden);
   }
   return ctx;
@@ -233,13 +231,4 @@ function requireAsync(req: Request): void {
   if (req.header('Prefer') !== 'respond-async') {
     throw new OperationOutcomeError(badRequest('Operation requires "Prefer: respond-async"'));
   }
-}
-
-async function sendAsyncResponse(req: Request, res: Response, callback: () => Promise<any>): Promise<void> {
-  const ctx = getAuthenticatedContext();
-  const { baseUrl } = getConfig();
-  const exec = new AsyncJobExecutor(ctx.repo);
-  await exec.init(req.protocol + '://' + req.get('host') + req.originalUrl);
-  exec.start(callback);
-  sendOutcome(res, accepted(exec.getContentLocation(baseUrl)));
 }

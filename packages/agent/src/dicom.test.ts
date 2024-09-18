@@ -3,7 +3,7 @@ import { Agent, Bot, Endpoint, Resource } from '@medplum/fhirtypes';
 import { MockClient } from '@medplum/mock';
 import * as dimse from 'dcmjs-dimse';
 import { Server } from 'mock-socket';
-import path from 'path';
+import path from 'node:path';
 import { App } from './app';
 
 jest.mock('node-windows');
@@ -66,8 +66,6 @@ describe('DICOM', () => {
     //
     // C-ECHO
     //
-    console.log('CODY sending C-ECHO');
-
     const echoResponse = (await new Promise((resolve, reject) => {
       const request = new dimse.requests.CEchoRequest();
       request.on('response', resolve);
@@ -103,7 +101,7 @@ describe('DICOM', () => {
     expect(storeCommandDataset?.getElement('Status')).toEqual(0);
 
     client.clearRequests();
-    app.stop();
+    await app.stop();
     mockServer.stop();
   }, 10000);
 });

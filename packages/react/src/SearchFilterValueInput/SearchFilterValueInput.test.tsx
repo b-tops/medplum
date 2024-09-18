@@ -4,7 +4,7 @@ import { MockClient } from '@medplum/mock';
 import { MedplumProvider } from '@medplum/react-hooks';
 import { ReactNode } from 'react';
 import { convertIsoToLocal } from '../DateTimeInput/DateTimeInput.utils';
-import { act, fireEvent, render, screen, waitFor } from '../test-utils/render';
+import { act, fireEvent, render, screen } from '../test-utils/render';
 import { SearchFilterValueInput } from './SearchFilterValueInput';
 
 const medplum = new MockClient();
@@ -141,11 +141,15 @@ describe('SearchFilterValueInput', () => {
     );
 
     // Wait for the resource to load
+    expect(await screen.findByText('Test Organization')).toBeInTheDocument();
+
+    // Clear the existing value
+    const clearButton = screen.getByTitle('Clear all');
     await act(async () => {
-      await waitFor(() => screen.getByText('Test Organization'));
+      fireEvent.click(clearButton);
     });
 
-    const input = screen.getAllByRole('searchbox')[1] as HTMLInputElement;
+    const input = screen.getAllByRole('searchbox')[0] as HTMLInputElement;
     await act(async () => {
       fireEvent.change(input, { target: { value: 'Different' } });
     });

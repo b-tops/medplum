@@ -1,4 +1,4 @@
-import { Operator as FhirOperator, Filter, SortRule } from '@medplum/core';
+import { Operator as FhirOperator, Filter, SortRule, splitSearchOnComma } from '@medplum/core';
 import { Resource, ResourceType, SearchParameter } from '@medplum/fhirtypes';
 import { Pool, PoolClient } from 'pg';
 import {
@@ -22,7 +22,7 @@ import {
  *   2) Human Names - structured names on Patients, Practitioners, and other person resource types
  *   3) Contact Points - email addresses and phone numbers
  */
-export abstract class LookupTable<T> {
+export abstract class LookupTable {
   /**
    * Returns the unique name of the lookup table.
    * @param resourceType - The resource type.
@@ -48,8 +48,9 @@ export abstract class LookupTable<T> {
    * Indexes the resource in the lookup table.
    * @param client - The database client.
    * @param resource - The resource to index.
+   * @param create - True if the resource should be created (vs updated).
    */
-  abstract indexResource(client: PoolClient, resource: Resource): Promise<void>;
+  abstract indexResource(client: PoolClient, resource: Resource, create: boolean): Promise<void>;
 
   /**
    * Builds a "where" condition for the select query builder.
@@ -64,7 +65,7 @@ export abstract class LookupTable<T> {
     const columnName = this.getColumnName(filter.code);
 
     const disjunction = new Disjunction([]);
-    for (const option of filter.value.split(',')) {
+    for (const option of splitSearchOnComma(filter.value)) {
       if (filter.operator === FhirOperator.EXACT) {
         disjunction.expressions.push(new Condition(new Column(lookupTableName, columnName), '=', option.trim()));
       } else if (filter.operator === FhirOperator.CONTAINS) {
@@ -120,27 +121,6 @@ export abstract class LookupTable<T> {
       joinOnExpression
     );
     selectQuery.orderBy(new Column(joinName, columnName), sortRule.descending);
-  }
-
-  /**
-   * Returns the existing list of indexed addresses.
-   * @param client - The database client.
-   * @param resourceType - The FHIR resource type.
-   * @param resourceId - The FHIR resource ID.
-   * @returns Promise for the list of indexed addresses.
-   */
-  protected async getExistingValues(
-    client: Pool | PoolClient,
-    resourceType: ResourceType,
-    resourceId: string
-  ): Promise<T[]> {
-    const tableName = this.getTableName(resourceType);
-    return new SelectQuery(tableName)
-      .column('content')
-      .where('resourceId', '=', resourceId)
-      .orderBy('index')
-      .execute(client)
-      .then((result) => result.map((row) => JSON.parse(row.content) as T));
   }
 
   /**

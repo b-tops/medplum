@@ -1,6 +1,7 @@
 import {
   allOk,
   badRequest,
+  conflict,
   createReference,
   getReferenceString,
   InviteRequest,
@@ -16,7 +17,7 @@ import Mail from 'nodemailer/lib/mailer';
 import { resetPassword } from '../auth/resetpassword';
 import { bcryptHashPassword, createProfile, createProjectMembership } from '../auth/utils';
 import { getConfig } from '../config';
-import { getAuthenticatedContext } from '../context';
+import { getAuthenticatedContext, getLogger } from '../context';
 import { sendEmail } from '../email/email';
 import { getSystemRepo, Repository } from '../fhir/repo';
 import { sendResponse } from '../fhir/response';
@@ -50,7 +51,7 @@ export async function inviteHandler(req: Request, res: Response): Promise<void> 
   }
 
   const { membership } = await inviteUser(inviteRequest);
-  return sendResponse(res, allOk, membership);
+  return sendResponse(req, res, allOk, membership);
 }
 
 export interface ServerInviteRequest extends InviteRequest {
@@ -65,7 +66,8 @@ export interface ServerInviteResponse {
 
 export async function inviteUser(request: ServerInviteRequest): Promise<ServerInviteResponse> {
   const systemRepo = getSystemRepo();
-  const ctx = getAuthenticatedContext();
+  const logger = getLogger();
+
   if (request.email) {
     request.email = request.email.toLowerCase();
   }
@@ -86,15 +88,15 @@ export async function inviteUser(request: ServerInviteRequest): Promise<ServerIn
 
   if (!user) {
     existingUser = false;
-    ctx.logger.info('User creation request received', { email });
+    logger.info('User creation request received', { email });
     user = await createUser(request);
-    ctx.logger.info('User created', { id: user.id, email });
+    logger.info('User created', { id: user.id, email });
     passwordResetUrl = await resetPassword(user, 'invite');
   }
 
   let profile = await searchForExistingProfile(request);
   if (!profile) {
-    ctx.logger.info('Creating profile for invite request', {
+    logger.info('Creating profile for invite request', {
       project: getReferenceString(project),
       email,
       profileType: request.resourceType,
@@ -107,7 +109,7 @@ export async function inviteUser(request: ServerInviteRequest): Promise<ServerIn
       email
     )) as Practitioner;
 
-    ctx.logger.info('Profile  created', { profile: getReferenceString(profile) });
+    logger.info('Profile  created', { profile: getReferenceString(profile) });
   }
 
   const membershipTemplate = request.membership ?? {};
@@ -213,11 +215,11 @@ async function createOrUpdateProjectMembership(
   const existingMembership = await searchForExistingMembership(systemRepo, user, project);
   if (existingMembership) {
     if (!upsert) {
-      throw new OperationOutcomeError(badRequest('User is already a member of this project'));
+      throw new OperationOutcomeError(conflict('User is already a member of this project'));
     }
 
     if (existingMembership.profile?.reference !== getReferenceString(profile)) {
-      throw new OperationOutcomeError(badRequest('User is already a member of this project with a different profile'));
+      throw new OperationOutcomeError(conflict('User is already a member of this project with a different profile'));
     }
 
     // Update the existing membership

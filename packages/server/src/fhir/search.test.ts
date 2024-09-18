@@ -6,9 +6,7 @@ import {
   normalizeOperationOutcome,
   OperationOutcomeError,
   Operator,
-  parseSearchDefinition,
   parseSearchRequest,
-  parseSearchUrl,
   SearchRequest,
   SNOMED,
 } from '@medplum/core';
@@ -17,6 +15,7 @@ import {
   AllergyIntolerance,
   Appointment,
   AuditEvent,
+  Binary,
   Bundle,
   CareTeam,
   Coding,
@@ -24,12 +23,15 @@ import {
   Condition,
   DiagnosticReport,
   Encounter,
+  Goal,
+  Location,
   MeasureReport,
   Observation,
   Organization,
   Patient,
   PlanDefinition,
   Practitioner,
+  Project,
   Provenance,
   Questionnaire,
   QuestionnaireResponse,
@@ -42,19 +44,19 @@ import {
 } from '@medplum/fhirtypes';
 import { randomUUID } from 'crypto';
 import { initAppServices, shutdownApp } from '../app';
-import { loadTestConfig } from '../config';
+import { loadTestConfig, MedplumServerConfig } from '../config';
 import { bundleContains, createTestProject, withTestContext } from '../test.setup';
-import { Repository, getSystemRepo } from './repo';
+import { getSystemRepo, Repository } from './repo';
 
 jest.mock('hibp');
-jest.mock('ioredis');
 
 describe('FHIR Search', () => {
   describe('project-scoped Repository', () => {
+    let config: MedplumServerConfig;
     let repo: Repository;
 
     beforeAll(async () => {
-      const config = await loadTestConfig();
+      config = await loadTestConfig();
       await initAppServices(config);
       const { project } = await createTestProject();
       repo = new Repository({
@@ -67,7 +69,7 @@ describe('FHIR Search', () => {
       await shutdownApp();
     });
 
-    test('Search total', async () => {
+    test('Search total', async () =>
       withTestContext(async () => {
         await repo.createResource<Patient>({
           resourceType: 'Patient',
@@ -103,20 +105,18 @@ describe('FHIR Search', () => {
         });
         expect(result4.total).toBeDefined();
         expect(typeof result4.total).toBe('number');
-      }).catch((err) => {
-        throw err;
-      });
-    });
+      }));
 
-    test('Search count=0', async () => {
-      const result1 = await repo.search({
-        resourceType: 'Patient',
-        count: 0,
-      });
-      expect(result1.entry).toBeUndefined();
-      expect(result1.link).toBeDefined();
-      expect(result1.link?.length).toBe(1);
-    });
+    test('Search count=0', async () =>
+      withTestContext(async () => {
+        const result1 = await repo.search({
+          resourceType: 'Patient',
+          count: 0,
+        });
+        expect(result1.entry).toBeUndefined();
+        expect(result1.link).toBeDefined();
+        expect(result1.link?.length).toBe(1);
+      }));
 
     test('Search _summary', () =>
       withTestContext(async () => {
@@ -540,103 +540,113 @@ describe('FHIR Search', () => {
         expect(bundle.entry?.[0]?.resource?.id).toEqual(response1.id);
       }));
 
-    test('Search for token in array', async () => {
-      const bundle = await repo.search({
-        resourceType: 'SearchParameter',
-        filters: [
-          {
-            code: 'base',
-            operator: Operator.EQUALS,
-            value: 'Patient',
-          },
-        ],
-        count: 100,
-      });
+    test('Search for token in array', async () =>
+      withTestContext(async () => {
+        const bundle = await repo.search({
+          resourceType: 'SearchParameter',
+          filters: [
+            {
+              code: 'base',
+              operator: Operator.EQUALS,
+              value: 'Patient',
+            },
+          ],
+          count: 100,
+        });
 
-      expect(bundle.entry?.find((e) => (e.resource as SearchParameter).code === 'name')).toBeDefined();
-      expect(bundle.entry?.find((e) => (e.resource as SearchParameter).code === 'email')).toBeDefined();
-    });
+        expect(bundle.entry?.find((e) => (e.resource as SearchParameter).code === 'name')).toBeDefined();
+        expect(bundle.entry?.find((e) => (e.resource as SearchParameter).code === 'email')).toBeDefined();
+      }));
 
-    test('Search sort by Patient.id', async () => {
-      const bundle = await repo.search({
-        resourceType: 'Patient',
-        sortRules: [{ code: '_id' }],
-      });
+    test('Search sort by Patient.id', async () =>
+      withTestContext(async () => {
+        const bundle = await repo.search({
+          resourceType: 'Patient',
+          sortRules: [{ code: '_id' }],
+        });
 
-      expect(bundle).toBeDefined();
-    });
+        expect(bundle).toBeDefined();
+      }));
 
-    test('Search sort by Patient.meta.lastUpdated', async () => {
-      const bundle = await repo.search({
-        resourceType: 'Patient',
-        sortRules: [{ code: '_lastUpdated' }],
-      });
+    test('Search sort by Patient.meta.lastUpdated', async () =>
+      withTestContext(async () => {
+        const bundle = await repo.search({
+          resourceType: 'Patient',
+          sortRules: [{ code: '_lastUpdated' }],
+        });
 
-      expect(bundle).toBeDefined();
-    });
+        expect(bundle).toBeDefined();
+      }));
 
-    test('Search sort by Patient.identifier', async () => {
-      const bundle = await repo.search({
-        resourceType: 'Patient',
-        sortRules: [{ code: 'identifier' }],
-      });
+    test('Search sort by Patient.identifier', async () =>
+      withTestContext(async () => {
+        const bundle = await repo.search({
+          resourceType: 'Patient',
+          sortRules: [{ code: 'identifier' }],
+        });
 
-      expect(bundle).toBeDefined();
-    });
+        expect(bundle).toBeDefined();
+      }));
 
-    test('Search sort by Patient.name', async () => {
-      const bundle = await repo.search({
-        resourceType: 'Patient',
-        sortRules: [{ code: 'name' }],
-      });
+    test('Search sort by Patient.name', async () =>
+      withTestContext(async () => {
+        const bundle = await repo.search({
+          resourceType: 'Patient',
+          sortRules: [{ code: 'name' }],
+        });
 
-      expect(bundle).toBeDefined();
-    });
+        expect(bundle).toBeDefined();
+      }));
 
-    test('Search sort by Patient.given', async () => {
-      const bundle = await repo.search({
-        resourceType: 'Patient',
-        sortRules: [{ code: 'given' }],
-      });
+    test('Search sort by Patient.given', async () =>
+      withTestContext(async () => {
+        const bundle = await repo.search({
+          resourceType: 'Patient',
+          sortRules: [{ code: 'given' }],
+        });
 
-      expect(bundle).toBeDefined();
-    });
+        expect(bundle).toBeDefined();
+      }));
 
-    test('Search sort by Patient.address', async () => {
-      const bundle = await repo.search({
-        resourceType: 'Patient',
-        sortRules: [{ code: 'address' }],
-      });
+    test('Search sort by Patient.address', async () =>
+      withTestContext(async () => {
+        const bundle = await repo.search({
+          resourceType: 'Patient',
+          sortRules: [{ code: 'address' }],
+        });
 
-      expect(bundle).toBeDefined();
-    });
+        expect(bundle).toBeDefined();
+      }));
 
-    test('Search sort by Patient.telecom', async () => {
-      const bundle = await repo.search({
-        resourceType: 'Patient',
-        sortRules: [{ code: 'telecom' }],
-      });
+    test('Search sort by Patient.telecom', async () =>
+      withTestContext(async () => {
+        const bundle = await repo.search({
+          resourceType: 'Patient',
+          sortRules: [{ code: 'telecom' }],
+        });
 
-      expect(bundle).toBeDefined();
-    });
+        expect(bundle).toBeDefined();
+      }));
 
-    test('Search sort by Patient.email', async () => {
-      const bundle = await repo.search({
-        resourceType: 'Patient',
-        sortRules: [{ code: 'email' }],
-      });
+    test('Search sort by Patient.email', async () =>
+      withTestContext(async () => {
+        const bundle = await repo.search({
+          resourceType: 'Patient',
+          sortRules: [{ code: 'email' }],
+        });
 
-      expect(bundle).toBeDefined();
-    });
+        expect(bundle).toBeDefined();
+      }));
 
-    test('Search sort by Patient.birthDate', async () => {
-      const bundle = await repo.search({
-        resourceType: 'Patient',
-        sortRules: [{ code: 'birthdate' }],
-      });
+    test('Search sort by Patient.birthDate', async () =>
+      withTestContext(async () => {
+        const bundle = await repo.search({
+          resourceType: 'Patient',
+          sortRules: [{ code: 'birthdate' }],
+        });
 
-      expect(bundle).toBeDefined();
-    });
+        expect(bundle).toBeDefined();
+      }));
 
     test('Filter and sort on same search parameter', () =>
       withTestContext(async () => {
@@ -750,38 +760,63 @@ describe('FHIR Search', () => {
         expect(searchResult2.entry?.length).toEqual(0);
       }));
 
-    test('String filter', async () => {
-      const bundle1 = await repo.search<StructureDefinition>({
-        resourceType: 'StructureDefinition',
-        filters: [
-          {
-            code: 'name',
-            operator: Operator.EQUALS,
-            value: 'Questionnaire',
-          },
-        ],
-        sortRules: [
-          {
-            code: 'name',
-            descending: false,
-          },
-        ],
-      });
-      expect(bundle1.entry?.map((e) => e.resource?.name)).toEqual(['Questionnaire', 'QuestionnaireResponse']);
+    test('String filter', async () =>
+      withTestContext(async () => {
+        const bundle1 = await repo.search<StructureDefinition>({
+          resourceType: 'StructureDefinition',
+          filters: [
+            {
+              code: 'name',
+              operator: Operator.EQUALS,
+              value: 'Questionnaire',
+            },
+          ],
+          sortRules: [
+            {
+              code: 'name',
+              descending: false,
+            },
+          ],
+        });
+        expect(bundle1.entry?.map((e) => e.resource?.name)).toEqual(['Questionnaire', 'QuestionnaireResponse']);
 
-      const bundle2 = await repo.search({
-        resourceType: 'StructureDefinition',
-        filters: [
-          {
-            code: 'name',
-            operator: Operator.EXACT,
-            value: 'Questionnaire',
-          },
-        ],
-      });
-      expect(bundle2.entry?.length).toEqual(1);
-      expect((bundle2.entry?.[0]?.resource as StructureDefinition).name).toEqual('Questionnaire');
-    });
+        const bundle2 = await repo.search({
+          resourceType: 'StructureDefinition',
+          filters: [
+            {
+              code: 'name',
+              operator: Operator.EXACT,
+              value: 'Questionnaire',
+            },
+          ],
+        });
+        expect(bundle2.entry?.length).toEqual(1);
+        expect((bundle2.entry?.[0]?.resource as StructureDefinition).name).toEqual('Questionnaire');
+      }));
+
+    test('String filter with escaped commas', async () =>
+      withTestContext(async () => {
+        // Create a name with commas
+        const name = randomUUID().replaceAll('-', ',');
+
+        const location = await repo.createResource<Location>({
+          resourceType: 'Location',
+          name,
+        });
+
+        const bundle = await repo.search<Location>({
+          resourceType: 'Location',
+          filters: [
+            {
+              code: 'name',
+              operator: Operator.EXACT,
+              value: name.replaceAll(',', '\\,'),
+            },
+          ],
+        });
+        expect(bundle.entry?.length).toEqual(1);
+        expect(bundleContains(bundle, location)).toBe(true);
+      }));
 
     test('Filter by _id', () =>
       withTestContext(async () => {
@@ -827,50 +862,53 @@ describe('FHIR Search', () => {
         expect(searchResult2.entry?.length).toEqual(0);
       }));
 
-    test('Empty _id', async () => {
-      const searchResult1 = await repo.search({
-        resourceType: 'Patient',
-        filters: [
-          {
-            code: '_id',
-            operator: Operator.EQUALS,
-            value: '',
-          },
-        ],
-      });
+    test('Empty _id', async () =>
+      withTestContext(async () => {
+        const searchResult1 = await repo.search({
+          resourceType: 'Patient',
+          filters: [
+            {
+              code: '_id',
+              operator: Operator.EQUALS,
+              value: '',
+            },
+          ],
+        });
 
-      expect(searchResult1.entry?.length).toEqual(0);
-    });
+        expect(searchResult1.entry?.length).toEqual(0);
+      }));
 
-    test('Non UUID _id', async () => {
-      const searchResult1 = await repo.search({
-        resourceType: 'Patient',
-        filters: [
-          {
-            code: '_id',
-            operator: Operator.EQUALS,
-            value: 'x',
-          },
-        ],
-      });
+    test('Non UUID _id', async () =>
+      withTestContext(async () => {
+        const searchResult1 = await repo.search({
+          resourceType: 'Patient',
+          filters: [
+            {
+              code: '_id',
+              operator: Operator.EQUALS,
+              value: 'x',
+            },
+          ],
+        });
 
-      expect(searchResult1.entry?.length).toEqual(0);
-    });
+        expect(searchResult1.entry?.length).toEqual(0);
+      }));
 
-    test('Non UUID _compartment', async () => {
-      const searchResult1 = await repo.search({
-        resourceType: 'Patient',
-        filters: [
-          {
-            code: '_compartment',
-            operator: Operator.EQUALS,
-            value: 'x',
-          },
-        ],
-      });
+    test('Non UUID _compartment', async () =>
+      withTestContext(async () => {
+        const searchResult1 = await repo.search({
+          resourceType: 'Patient',
+          filters: [
+            {
+              code: '_compartment',
+              operator: Operator.EQUALS,
+              value: 'x',
+            },
+          ],
+        });
 
-      expect(searchResult1.entry?.length).toEqual(0);
-    });
+        expect(searchResult1.entry?.length).toEqual(0);
+      }));
 
     test('Reference string _compartment', () =>
       withTestContext(async () => {
@@ -891,23 +929,24 @@ describe('FHIR Search', () => {
         expect(bundleContains(searchResult1 as Bundle, patient as Patient)).toEqual(true);
       }));
 
-    test('Handle malformed _lastUpdated', async () => {
-      try {
-        await repo.search({
-          resourceType: 'Patient',
-          filters: [
-            {
-              code: '_lastUpdated',
-              operator: Operator.GREATER_THAN,
-              value: 'xyz',
-            },
-          ],
-        });
-        fail('Expected error');
-      } catch (err) {
-        expect(normalizeErrorString(err)).toEqual('Invalid date value: xyz');
-      }
-    });
+    test('Handle malformed _lastUpdated', async () =>
+      withTestContext(async () => {
+        try {
+          await repo.search({
+            resourceType: 'Patient',
+            filters: [
+              {
+                code: '_lastUpdated',
+                operator: Operator.GREATER_THAN,
+                value: 'xyz',
+              },
+            ],
+          });
+          fail('Expected error');
+        } catch (err) {
+          expect(normalizeErrorString(err)).toEqual('Invalid date value: xyz');
+        }
+      }));
 
     test('Filter by Coding', () =>
       withTestContext(async () => {
@@ -1330,14 +1369,14 @@ describe('FHIR Search', () => {
 
         // Test singlet reference column
         let results = await repo.searchResources(
-          parseSearchDefinition(`Patient?identifier=${patientIdentifier}&organization:missing=false`)
+          parseSearchRequest(`Patient?identifier=${patientIdentifier}&organization:missing=false`)
         );
         expect(results).toHaveLength(1);
         expect(results[0]?.id).toEqual(patient.id);
 
         // Test array reference column
         results = await repo.searchResources(
-          parseSearchDefinition(`Patient?identifier=${patientIdentifier}&general-practitioner:missing=false`)
+          parseSearchRequest(`Patient?identifier=${patientIdentifier}&general-practitioner:missing=false`)
         );
         expect(results).toHaveLength(1);
         expect(results[0]?.id).toEqual(patient.id);
@@ -1563,23 +1602,24 @@ describe('FHIR Search', () => {
         expect(searchResult.entry).toHaveLength(2);
       }));
 
-    test('Error on invalid search parameter', async () => {
-      try {
-        await repo.search({
-          resourceType: 'ServiceRequest',
-          filters: [
-            {
-              code: 'basedOn', // should be "based-on"
-              operator: Operator.EQUALS,
-              value: 'ServiceRequest/123',
-            },
-          ],
-        });
-      } catch (err) {
-        const outcome = (err as OperationOutcomeError).outcome;
-        expect(outcome.issue?.[0]?.details?.text).toEqual('Unknown search parameter: basedOn');
-      }
-    });
+    test('Error on invalid search parameter', async () =>
+      withTestContext(async () => {
+        try {
+          await repo.search({
+            resourceType: 'ServiceRequest',
+            filters: [
+              {
+                code: 'basedOn', // should be "based-on"
+                operator: Operator.EQUALS,
+                value: 'ServiceRequest/123',
+              },
+            ],
+          });
+        } catch (err) {
+          const outcome = (err as OperationOutcomeError).outcome;
+          expect(outcome.issue?.[0]?.details?.text).toEqual('Unknown search parameter: basedOn');
+        }
+      }));
 
     test('Patient search without resource type', () =>
       withTestContext(async () => {
@@ -1638,8 +1678,10 @@ describe('FHIR Search', () => {
         expect(searchResult.entry?.[0]?.resource?.id).toEqual(observation.id);
       }));
 
-    test('Chained search on array columns', () =>
+    test('Chained search on array columns using reference tables', () =>
       withTestContext(async () => {
+        config.chainedSearchWithReferenceTables = true;
+
         // Create Practitioner
         const pcp = await repo.createResource<Practitioner>({
           resourceType: 'Practitioner',
@@ -1671,15 +1713,17 @@ describe('FHIR Search', () => {
 
         // Search chain
         const searchResult = await repo.search(
-          parseSearchDefinition(
+          parseSearchRequest(
             `Patient?general-practitioner:Practitioner._has:CareTeam:participant:category=${categorySystem}|${code}`
           )
         );
         expect(searchResult.entry?.[0]?.resource?.id).toEqual(patient.id);
       }));
 
-    test('Chained search on singlet columns', () =>
+    test('Chained search on single columns using reference tables', () =>
       withTestContext(async () => {
+        config.chainedSearchWithReferenceTables = true;
+
         const code = randomUUID();
         // Create linked resources
         const patient = await repo.createResource<Patient>({
@@ -1706,7 +1750,86 @@ describe('FHIR Search', () => {
         });
 
         const result = await repo.search(
-          parseSearchDefinition(`Patient?_has:Observation:subject:encounter:Encounter.class=${code}`)
+          parseSearchRequest(`Patient?_has:Observation:subject:encounter:Encounter.class=${code}`)
+        );
+        expect(result.entry?.[0]?.resource?.id).toEqual(patient.id);
+      }));
+
+    // TODO: To be removed when reference table migration is complete
+    test('Chained search on array columns using reference strings', () =>
+      withTestContext(async () => {
+        config.chainedSearchWithReferenceTables = false;
+
+        // Create Practitioner
+        const pcp = await repo.createResource<Practitioner>({
+          resourceType: 'Practitioner',
+        });
+        // Create Patient
+        const patient = await repo.createResource<Patient>({
+          resourceType: 'Patient',
+          generalPractitioner: [createReference(pcp)],
+        });
+
+        // Create CareTeam
+        const code = randomUUID();
+        const categorySystem = 'http://example.com/care-team-category';
+        await repo.createResource<CareTeam>({
+          resourceType: 'CareTeam',
+          category: [
+            {
+              coding: [
+                {
+                  system: categorySystem,
+                  code,
+                  display: 'Public health-focused care team',
+                },
+              ],
+            },
+          ],
+          participant: [{ member: createReference(pcp) }],
+        });
+
+        // Search chain
+        const searchResult = await repo.search(
+          parseSearchRequest(
+            `Patient?general-practitioner:Practitioner._has:CareTeam:participant:category=${categorySystem}|${code}`
+          )
+        );
+        expect(searchResult.entry?.[0]?.resource?.id).toEqual(patient.id);
+      }));
+
+    // TODO: To be removed when reference table migration is complete
+    test('Chained search on single columns using reference strings', () =>
+      withTestContext(async () => {
+        config.chainedSearchWithReferenceTables = false;
+
+        const code = randomUUID();
+        // Create linked resources
+        const patient = await repo.createResource<Patient>({
+          resourceType: 'Patient',
+        });
+        const encounter = await repo.createResource<Encounter>({
+          resourceType: 'Encounter',
+          status: 'finished',
+          class: { system: 'http://example.com/appt-type', code },
+        });
+        const observation = await repo.createResource<Observation>({
+          resourceType: 'Observation',
+          status: 'final',
+          code: { text: 'Throat culture' },
+          subject: createReference(patient),
+          encounter: createReference(encounter),
+        });
+        await repo.createResource<DiagnosticReport>({
+          resourceType: 'DiagnosticReport',
+          status: 'final',
+          code: { text: 'Strep test' },
+          encounter: createReference(encounter),
+          result: [createReference(observation)],
+        });
+
+        const result = await repo.search(
+          parseSearchRequest(`Patient?_has:Observation:subject:encounter:Encounter.class=${code}`)
         );
         expect(result.entry?.[0]?.resource?.id).toEqual(patient.id);
       }));
@@ -1715,7 +1838,7 @@ describe('FHIR Search', () => {
       withTestContext(async () => {
         await expect(() =>
           repo.search(
-            parseSearchDefinition(
+            parseSearchRequest(
               `Patient?_has:Observation:subject:encounter:Encounter._has:DiagnosticReport:encounter:result.specimen.parent.collected=2023`
             )
           )
@@ -1736,7 +1859,9 @@ describe('FHIR Search', () => {
       ],
       ['Patient?_has:Observation:status=active', 'Invalid search chain: _has:Observation:status'],
     ])('Invalid chained search parameters: %s', (searchString: string, errorMsg: string) => {
-      return expect(repo.search(parseSearchDefinition(searchString))).rejects.toEqual(new Error(errorMsg));
+      return withTestContext(async () =>
+        expect(repo.search(parseSearchRequest(searchString))).rejects.toEqual(new Error(errorMsg))
+      );
     });
 
     test('Include references success', () =>
@@ -1829,22 +1954,23 @@ describe('FHIR Search', () => {
         expect(bundleContains(bundle, activity2)).toBeTruthy();
       }));
 
-    test('Include references invalid search param', async () => {
-      try {
-        await repo.search({
-          resourceType: 'ServiceRequest',
-          include: [
-            {
-              resourceType: 'ServiceRequest',
-              searchParam: 'xyz',
-            },
-          ],
-        });
-      } catch (err) {
-        const outcome = (err as OperationOutcomeError).outcome;
-        expect(outcome.issue?.[0]?.details?.text).toEqual('Invalid include parameter: ServiceRequest:xyz');
-      }
-    });
+    test('Include references invalid search param', async () =>
+      withTestContext(async () => {
+        try {
+          await repo.search({
+            resourceType: 'ServiceRequest',
+            include: [
+              {
+                resourceType: 'ServiceRequest',
+                searchParam: 'xyz',
+              },
+            ],
+          });
+        } catch (err) {
+          const outcome = (err as OperationOutcomeError).outcome;
+          expect(outcome.issue?.[0]?.details?.text).toEqual('Invalid include parameter: ServiceRequest:xyz');
+        }
+      }));
 
     test('Reverse include Provenance', () =>
       withTestContext(async () => {
@@ -2452,9 +2578,7 @@ describe('FHIR Search', () => {
         });
 
         const bundle = await repo.search(
-          parseSearchUrl(
-            new URL(`https://x/Condition?subject=${getReferenceString(p)}&code:not=x&_count=1&_total=accurate`)
-          )
+          parseSearchRequest(`https://x/Condition?subject=${getReferenceString(p)}&code:not=x&_count=1&_total=accurate`)
         );
         expect(bundle.entry?.length).toEqual(1);
 
@@ -2524,22 +2648,20 @@ describe('FHIR Search', () => {
         });
 
         // Search with system
-        const bundle1 = await repo.search(
-          parseSearchDefinition(`Condition?code=${code}&subject:identifier=mrn|123456`)
-        );
+        const bundle1 = await repo.search(parseSearchRequest(`Condition?code=${code}&subject:identifier=mrn|123456`));
         expect(bundle1.entry?.length).toEqual(1);
         expect(bundleContains(bundle1, c1)).toBeTruthy();
         expect(bundleContains(bundle1, c2)).not.toBeTruthy();
 
         // Search without system
-        const bundle2 = await repo.search(parseSearchDefinition(`Condition?code=${code}&subject:identifier=123456`));
+        const bundle2 = await repo.search(parseSearchRequest(`Condition?code=${code}&subject:identifier=123456`));
         expect(bundle2.entry?.length).toEqual(2);
         expect(bundleContains(bundle2, c1)).toBeTruthy();
         expect(bundleContains(bundle2, c2)).toBeTruthy();
 
         // Search with count
         const bundle3 = await repo.search(
-          parseSearchDefinition(`Condition?code=${code}&subject:identifier=mrn|123456&_total=accurate`)
+          parseSearchRequest(`Condition?code=${code}&subject:identifier=mrn|123456&_total=accurate`)
         );
         expect(bundle3.entry?.length).toEqual(1);
         expect(bundle3.total).toBe(1);
@@ -2575,7 +2697,7 @@ describe('FHIR Search', () => {
         // Search by "subject"
         // This will include both Tasks, because the "subject" search parameter does not care about "type"
         const bundle1 = await repo.search(
-          parseSearchDefinition(`Task?subject:identifier=mrn|${identifier}&_total=accurate`)
+          parseSearchRequest(`Task?subject:identifier=mrn|${identifier}&_total=accurate`)
         );
         expect(bundle1.total).toEqual(2);
         expect(bundle1.entry?.length).toEqual(2);
@@ -2585,7 +2707,7 @@ describe('FHIR Search', () => {
         // Search by "patient"
         // This will only include the Task with the explicit "Patient" type, because the "patient" search parameter does care about "type"
         const bundle2 = await repo.search(
-          parseSearchDefinition(`Task?patient:identifier=mrn|${identifier}&_total=accurate`)
+          parseSearchRequest(`Task?patient:identifier=mrn|${identifier}&_total=accurate`)
         );
         expect(bundle2.total).toEqual(1);
         expect(bundle2.entry?.length).toEqual(1);
@@ -2889,21 +3011,22 @@ describe('FHIR Search', () => {
         expect(bundleContains(bundle, task1)).not.toBeTruthy();
       }));
 
-    test('Get estimated count with filter on human name', async () => {
-      const result = await repo.search({
-        resourceType: 'Patient',
-        total: 'estimate',
-        filters: [
-          {
-            code: 'name',
-            operator: Operator.EQUALS,
-            value: 'John',
-          },
-        ],
-      });
-      expect(result.total).toBeDefined();
-      expect(typeof result.total).toBe('number');
-    });
+    test('Get estimated count with filter on human name', async () =>
+      withTestContext(async () => {
+        const result = await repo.search({
+          resourceType: 'Patient',
+          total: 'estimate',
+          filters: [
+            {
+              code: 'name',
+              operator: Operator.EQUALS,
+              value: 'John',
+            },
+          ],
+        });
+        expect(result.total).toBeDefined();
+        expect(typeof result.total).toBe('number');
+      }));
 
     test('Organization by name', () =>
       withTestContext(async () => {
@@ -2922,6 +3045,21 @@ describe('FHIR Search', () => {
           ],
         });
         expect(result.entry?.length).toBe(1);
+      }));
+
+    test('Ambiguous search columns', () =>
+      withTestContext(async () => {
+        const result = await repo.search({
+          resourceType: 'ProjectMembership',
+          filters: [
+            {
+              code: 'user:User.email',
+              operator: Operator.EQUALS,
+              value: randomUUID() + '@example.com',
+            },
+          ],
+        });
+        expect(result.entry?.length).toBe(0);
       }));
 
     test('Patient by name with stop word', () =>
@@ -3054,17 +3192,18 @@ describe('FHIR Search', () => {
         expect(bundleContains(result, p2)).toBe(true);
       }));
 
-    test('Sort by unknown search parameter', async () => {
-      try {
-        await repo.search({
-          resourceType: 'Patient',
-          sortRules: [{ code: 'xyz' }],
-        });
-      } catch (err) {
-        const outcome = normalizeOperationOutcome(err);
-        expect(outcome.issue?.[0]?.details?.text).toBe('Unknown search parameter: xyz');
-      }
-    });
+    test('Sort by unknown search parameter', async () =>
+      withTestContext(async () => {
+        try {
+          await repo.search({
+            resourceType: 'Patient',
+            sortRules: [{ code: 'xyz' }],
+          });
+        } catch (err) {
+          const outcome = normalizeOperationOutcome(err);
+          expect(outcome.issue?.[0]?.details?.text).toBe('Unknown search parameter: xyz');
+        }
+      }));
 
     test('Date range search', () =>
       withTestContext(async () => {
@@ -3190,6 +3329,305 @@ describe('FHIR Search', () => {
         expect(await searchByPeriod(Operator.ENDS_BEFORE, '2020-01-15T12:00:00.000Z')).toBe(false);
         expect(await searchByPeriod(Operator.ENDS_BEFORE, '2020-01-15T12:00:01.000Z')).toBe(true);
       }));
+
+    test('Multiple resource types with _type', async () =>
+      withTestContext(async () => {
+        const patient = await repo.createResource<Patient>({ resourceType: 'Patient' });
+        const obs = await repo.createResource<Observation>({
+          resourceType: 'Observation',
+          status: 'final',
+          code: { text: 'test' },
+          subject: createReference(patient),
+        });
+
+        const bundle = await repo.search({
+          resourceType: 'Patient',
+          types: ['Patient', 'Observation'],
+          filters: [{ code: '_compartment', operator: Operator.EQUALS, value: getReferenceString(patient) }],
+        });
+        expect(bundle.entry?.length).toBe(2);
+        expect(bundleContains(bundle, patient)).toBeTruthy();
+        expect(bundleContains(bundle, obs)).toBeTruthy();
+      }));
+
+    test('Binary search not allowed', async () =>
+      withTestContext(async () => {
+        try {
+          await repo.search<Binary>({ resourceType: 'Binary' });
+          throw new Error('Expected error');
+        } catch (err) {
+          const outcome = normalizeOperationOutcome(err);
+          expect(outcome.issue?.[0]?.details?.text).toBe('Cannot search on Binary resource type');
+        }
+      }));
+
+    describe('US Core Search Parameters', () => {
+      test('USCoreCareTeamRole', async () =>
+        withTestContext(async () => {
+          const careTeam = await repo.createResource<CareTeam>({
+            resourceType: 'CareTeam',
+            participant: [
+              {
+                member: {
+                  reference: 'Practitioner/123',
+                },
+                role: [
+                  {
+                    coding: [
+                      {
+                        system: 'http://snomed.info/sct',
+                        code: '102262009',
+                        display: 'Chocolate (substance)',
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          });
+
+          const bundle1 = await repo.search({
+            resourceType: 'CareTeam',
+            filters: [{ code: 'role', operator: Operator.EQUALS, value: '102262009' }],
+          });
+          expect(bundle1.entry?.length).toBe(1);
+          expect(bundleContains(bundle1, careTeam)).toBeTruthy();
+        }));
+      test('USCoreConditionAssertedDate', async () =>
+        withTestContext(async () => {
+          const resource = await repo.createResource<Condition>({
+            resourceType: 'Condition',
+            extension: [
+              {
+                url: 'http://hl7.org/fhir/StructureDefinition/condition-assertedDate',
+                // valueDateTime: '2024-03-18T23:04:00.000Z',
+                valueDateTime: '2000-03-18',
+              },
+            ],
+            subject: {
+              reference: 'Patient/123',
+              display: 'Matt Long',
+            },
+          });
+
+          const oldDate = new Date(1999, 11, 30);
+          const bundle1 = await repo.search({
+            resourceType: 'Condition',
+            // filters: [{ code: 'asserted-date', operator: Operator.GREATER_THAN, value: oldDate.toISOString() }],
+            filters: [{ code: 'asserted-date', operator: Operator.STARTS_AFTER, value: oldDate.toISOString() }],
+          });
+          expect(bundle1.entry?.length).toBe(1);
+          expect(bundleContains(bundle1, resource)).toBeTruthy();
+        }));
+      test('USCoreEncounterDischargeDisposition', async () =>
+        withTestContext(async () => {
+          const resource = await repo.createResource<Encounter>({
+            resourceType: 'Encounter',
+            status: 'unknown',
+            class: {
+              system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode',
+              code: 'IMP',
+              display: 'inpatient encounter',
+            },
+            hospitalization: {
+              dischargeDisposition: {
+                coding: [
+                  {
+                    system: 'http://www.nubc.org/patient-discharge',
+                    code: '01',
+                    display: 'Discharged to Home',
+                  },
+                ],
+              },
+            },
+          });
+          const bundle1 = await repo.search({
+            resourceType: 'Encounter',
+            filters: [{ code: 'discharge-disposition', operator: Operator.EQUALS, value: '01' }],
+          });
+          expect(bundle1.entry?.length).toBe(1);
+          expect(bundleContains(bundle1, resource)).toBeTruthy();
+
+          const bundle2 = await repo.search({
+            resourceType: 'Encounter',
+            filters: [{ code: 'discharge-disposition', operator: Operator.EQUALS, value: '55' }],
+          });
+          expect(bundle2.entry?.length).toBe(0);
+        }));
+      test('USCoreGoalDescription', async () =>
+        withTestContext(async () => {
+          const resource = await repo.createResource<Goal>({
+            resourceType: 'Goal',
+            lifecycleStatus: 'active',
+            description: {
+              coding: [
+                {
+                  system: 'http://snomed.info/sct',
+                  code: '406156006',
+                  display: 'In paid employment',
+                },
+              ],
+              text: 'This text is ignored in search.',
+            },
+            subject: {
+              reference: 'Patient/example',
+              display: 'Amy Shaw',
+            },
+          });
+          const bundle1 = await repo.search({
+            resourceType: 'Goal',
+            filters: [{ code: 'description', operator: Operator.EQUALS, value: '406156006' }],
+          });
+          expect(bundle1.entry?.length).toBe(1);
+          expect(bundleContains(bundle1, resource)).toBeTruthy();
+        }));
+
+      test('USCorePatient race, ethnicity, genderIdentity', async () =>
+        withTestContext(async () => {
+          const resource = await repo.createResource<Patient>({
+            resourceType: 'Patient',
+            extension: [
+              {
+                extension: [
+                  {
+                    url: 'ombCategory',
+                    valueCoding: {
+                      system: 'urn:oid:2.16.840.1.113883.6.238',
+                      code: '2106-3',
+                      display: 'White',
+                    },
+                  },
+                  {
+                    url: 'ombCategory',
+                    valueCoding: {
+                      system: 'urn:oid:2.16.840.1.113883.6.238',
+                      code: '1002-5',
+                      display: 'American Indian or Alaska Native',
+                    },
+                  },
+                  {
+                    url: 'ombCategory',
+                    valueCoding: {
+                      system: 'urn:oid:2.16.840.1.113883.6.238',
+                      code: '2028-9',
+                      display: 'Asian',
+                    },
+                  },
+                  {
+                    url: 'detailed',
+                    valueCoding: {
+                      system: 'urn:oid:2.16.840.1.113883.6.238',
+                      code: '1586-7',
+                      display: 'Shoshone',
+                    },
+                  },
+                  {
+                    url: 'detailed',
+                    valueCoding: {
+                      system: 'urn:oid:2.16.840.1.113883.6.238',
+                      code: '2036-2',
+                      display: 'Filipino',
+                    },
+                  },
+                  {
+                    url: 'text',
+                    valueString: 'Mixed',
+                  },
+                ],
+                url: 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-race',
+              },
+              {
+                extension: [
+                  {
+                    url: 'ombCategory',
+                    valueCoding: {
+                      system: 'urn:oid:2.16.840.1.113883.6.238',
+                      code: '2135-2',
+                      display: 'Hispanic or Latino',
+                    },
+                  },
+                  {
+                    url: 'detailed',
+                    valueCoding: {
+                      system: 'urn:oid:2.16.840.1.113883.6.238',
+                      code: '2184-0',
+                      display: 'Dominican',
+                    },
+                  },
+                  {
+                    url: 'detailed',
+                    valueCoding: {
+                      system: 'urn:oid:2.16.840.1.113883.6.238',
+                      code: '2148-5',
+                      display: 'Mexican',
+                    },
+                  },
+                  {
+                    url: 'text',
+                    valueString: 'Hispanic or Latino',
+                  },
+                ],
+                url: 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-ethnicity',
+              },
+              {
+                url: 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-genderIdentity',
+                valueCodeableConcept: {
+                  coding: [
+                    {
+                      system: 'http://terminology.hl7.org/CodeSystem/v3-NullFlavor',
+                      code: 'ASKU',
+                      display: 'asked but unknown',
+                    },
+                  ],
+                  text: 'asked but unknown',
+                },
+              },
+            ],
+          });
+
+          // race
+          const bundle1 = await repo.search({
+            resourceType: 'Patient',
+            // ombCategory
+            filters: [{ code: 'race', operator: Operator.EQUALS, value: '1002-5' }],
+          });
+          expect(bundle1.entry?.length).toBe(1);
+          expect(bundleContains(bundle1, resource)).toBeTruthy();
+
+          const bundle2 = await repo.search({
+            resourceType: 'Patient',
+            // detailed
+            filters: [{ code: 'race', operator: Operator.EQUALS, value: '1586-7' }],
+          });
+          expect(bundle2.entry?.length).toBe(1);
+          expect(bundleContains(bundle2, resource)).toBeTruthy();
+
+          // ethnicity
+          const bundle3 = await repo.search({
+            resourceType: 'Patient',
+            // ombCategory
+            filters: [{ code: 'ethnicity', operator: Operator.EQUALS, value: '2135-2' }],
+          });
+          expect(bundle3.entry?.length).toBe(1);
+          expect(bundleContains(bundle3, resource)).toBeTruthy();
+
+          const bundle4 = await repo.search({
+            resourceType: 'Patient',
+            // detailed
+            filters: [{ code: 'ethnicity', operator: Operator.EQUALS, value: '2184-0' }],
+          });
+          expect(bundle4.entry?.length).toBe(1);
+          expect(bundleContains(bundle4, resource)).toBeTruthy();
+
+          // genderIdentity
+          const bundle5 = await repo.search({
+            resourceType: 'Patient',
+            filters: [{ code: 'gender-identity', operator: Operator.EQUALS, value: 'ASKU' }],
+          });
+          expect(bundle5.entry?.length).toBe(1);
+          expect(bundleContains(bundle5, resource)).toBeTruthy();
+        }));
+    });
   });
 
   describe('systemRepo', () => {
@@ -3206,8 +3644,8 @@ describe('FHIR Search', () => {
 
     test('Filter by _project', () =>
       withTestContext(async () => {
-        const project1 = randomUUID();
-        const project2 = randomUUID();
+        const project1 = (await systemRepo.createResource<Project>({ resourceType: 'Project' })).id as string;
+        const project2 = (await systemRepo.createResource<Project>({ resourceType: 'Project' })).id as string;
 
         const patient1 = await systemRepo.createResource<Patient>({
           resourceType: 'Patient',
@@ -3364,7 +3802,7 @@ describe('FHIR Search', () => {
 
     test('Sort by _lastUpdated', () =>
       withTestContext(async () => {
-        const project = randomUUID();
+        const project = (await systemRepo.createResource<Project>({ resourceType: 'Project' })).id as string;
 
         const patient1 = await systemRepo.createResource<Patient>({
           resourceType: 'Patient',

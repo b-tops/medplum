@@ -13,8 +13,6 @@ import { getSystemRepo } from '../fhir/repo';
 import { createTestProject, withTestContext } from '../test.setup';
 import { revokeLogin } from './utils';
 
-jest.mock('@aws-sdk/client-sesv2');
-
 describe('OAuth Authorize', () => {
   const app = express();
   const systemRepo = getSystemRepo();
@@ -28,7 +26,7 @@ describe('OAuth Authorize', () => {
     await initApp(app, config);
 
     // Create a test project
-    ({ project, client } = await createTestProject());
+    ({ project, client } = await createTestProject({ withClient: true }));
 
     // Create a test user
     const { user } = await inviteUser({

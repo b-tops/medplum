@@ -1,8 +1,6 @@
 import { OperationOutcomeError, append, conflict } from '@medplum/core';
 import { Period } from '@medplum/fhirtypes';
-import { AsyncLocalStorage } from 'async_hooks';
 import { Client, Pool, PoolClient } from 'pg';
-import Cursor from 'pg-cursor';
 import { env } from 'process';
 
 const DEBUG = env['SQL_DEBUG'];
@@ -15,6 +13,8 @@ export enum ColumnType {
 }
 
 export type OperatorFunc = (sql: SqlBuilder, column: Column, parameter: any, paramType?: string) => void;
+
+export type TransactionIsolationLevel = 'READ COMMITTED' | 'REPEATABLE READ' | 'SERIALIZABLE';
 
 export const Operator = {
   '=': (sql: SqlBuilder, column: Column, parameter: any, _paramType?: string) => {
@@ -239,6 +239,24 @@ export class Exists implements Expression {
   }
 }
 
+export class Union implements Expression {
+  readonly queries: SelectQuery[];
+  constructor(...queries: SelectQuery[]) {
+    this.queries = queries;
+  }
+
+  buildSql(sql: SqlBuilder): void {
+    for (let i = 0; i < this.queries.length; i++) {
+      if (i > 0) {
+        sql.append(' UNION ');
+      }
+      sql.append('(');
+      this.queries[i].buildSql(sql);
+      sql.append(')');
+    }
+  }
+}
+
 export class Join {
   constructor(
     readonly joinType: 'LEFT JOIN' | 'INNER JOIN',
@@ -386,18 +404,27 @@ export abstract class BaseQuery {
   }
 }
 
-export class SelectQuery extends BaseQuery {
+interface CTE {
+  name: string;
+  expr: Expression;
+  recursive?: boolean;
+}
+
+export class SelectQuery extends BaseQuery implements Expression {
+  readonly innerQuery?: SelectQuery | Union;
   readonly distinctOns: Column[];
   readonly columns: Column[];
   readonly joins: Join[];
   readonly groupBys: GroupBy[];
   readonly orderBys: OrderBy[];
+  with?: CTE;
   limit_: number;
   offset_: number;
   joinCount = 0;
 
-  constructor(tableName: string) {
+  constructor(tableName: string, innerQuery?: SelectQuery | Union) {
     super(tableName);
+    this.innerQuery = innerQuery;
     this.distinctOns = [];
     this.columns = [];
     this.joins = [];
@@ -405,6 +432,11 @@ export class SelectQuery extends BaseQuery {
     this.orderBys = [];
     this.limit_ = 0;
     this.offset_ = 0;
+  }
+
+  withRecursive(name: string, expr: Expression): this {
+    this.with = { name, expr: expr, recursive: true };
+    return this;
   }
 
   distinctOn(column: Column | string): this {
@@ -461,6 +493,16 @@ export class SelectQuery extends BaseQuery {
     if (this.explain) {
       sql.append('EXPLAIN ');
     }
+    if (this.with) {
+      sql.append('WITH ');
+      if (this.with.recursive) {
+        sql.append('RECURSIVE ');
+      }
+      sql.appendIdentifier(this.with.name);
+      sql.append(' AS (');
+      this.with.expr.buildSql(sql);
+      sql.append(') ');
+    }
     sql.append('SELECT ');
     this.buildDistinctOn(sql);
     this.buildColumns(sql);
@@ -484,33 +526,6 @@ export class SelectQuery extends BaseQuery {
     const sql = new SqlBuilder();
     this.buildSql(sql);
     return sql.execute(conn);
-  }
-
-  async executeCursor(pool: Pool, callback: (row: any) => Promise<void>): Promise<void> {
-    callback = AsyncLocalStorage.bind(callback);
-    const BATCH_SIZE = 100;
-
-    const sql = new SqlBuilder();
-    this.buildSql(sql);
-
-    const client = await pool.connect();
-    try {
-      const cursor = client.query(new Cursor(sql.toString(), sql.getValues()));
-      try {
-        let hasMore = true;
-        while (hasMore) {
-          const rows = await cursor.read(BATCH_SIZE);
-          for (const row of rows) {
-            await callback(row);
-          }
-          hasMore = rows.length === BATCH_SIZE;
-        }
-      } finally {
-        await cursor.close();
-      }
-    } finally {
-      client.release();
-    }
   }
 
   private buildDistinctOn(sql: SqlBuilder): void {
@@ -544,6 +559,13 @@ export class SelectQuery extends BaseQuery {
 
   private buildFrom(sql: SqlBuilder): void {
     sql.append(' FROM ');
+
+    if (this.innerQuery) {
+      sql.append('(');
+      this.innerQuery.buildSql(sql);
+      sql.append(') AS ');
+    }
+
     sql.appendIdentifier(this.tableName);
 
     for (const join of this.joins) {

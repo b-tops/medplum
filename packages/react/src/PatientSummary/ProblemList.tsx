@@ -1,24 +1,11 @@
-import {
-  Anchor,
-  Badge,
-  Button,
-  Grid,
-  Group,
-  Modal,
-  NativeSelect,
-  Stack,
-  Text,
-  Textarea,
-  TextInput,
-} from '@mantine/core';
+import { Anchor, Grid, Group, Modal, Text } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { createReference } from '@medplum/core';
 import { Condition, Encounter, Patient } from '@medplum/fhirtypes';
 import { useMedplum } from '@medplum/react-hooks';
 import { Fragment, useCallback, useState } from 'react';
-import { CodeableConceptDisplay } from '../CodeableConceptDisplay/CodeableConceptDisplay';
-import { Form } from '../Form/Form';
 import { killEvent } from '../utils/dom';
+import { ConceptBadge } from './ConceptBadge';
+import { ConditionDialog } from './ConditionDialog';
 
 export interface ProblemListProps {
   readonly patient: Patient;
@@ -30,25 +17,22 @@ export function ProblemList(props: ProblemListProps): JSX.Element {
   const medplum = useMedplum();
   const { patient, encounter } = props;
   const [problems, setProblems] = useState<Condition[]>(props.problems);
+  const [editCondition, setEditCondition] = useState<Condition>();
   const [opened, { open, close }] = useDisclosure(false);
 
   const handleSubmit = useCallback(
-    (formData: Record<string, string>) => {
-      medplum
-        .createResource<Condition>({
-          resourceType: 'Condition',
-          subject: createReference(patient),
-          encounter: encounter ? createReference(encounter) : undefined,
-          code: { coding: [{ code: formData.problem, display: formData.problem }] },
-          onsetDateTime: formData.onset ? formData.onset : undefined,
-        })
-        .then((newProblem) => {
-          setProblems([...problems, newProblem]);
-          close();
-        })
-        .catch(console.error);
+    async (condition: Condition) => {
+      if (condition.id) {
+        const updatedCondition = await medplum.updateResource(condition);
+        setProblems(problems.map((p) => (p.id === updatedCondition.id ? updatedCondition : p)));
+      } else {
+        const newCondition = await medplum.createResource(condition);
+        setProblems([...problems, newCondition]);
+      }
+      setEditCondition(undefined);
+      close();
     },
-    [medplum, patient, encounter, problems, close]
+    [medplum, problems, close]
   );
 
   return (
@@ -58,9 +42,10 @@ export function ProblemList(props: ProblemListProps): JSX.Element {
           Problem List
         </Text>
         <Anchor
-          href="#"
+          component="button"
           onClick={(e) => {
             killEvent(e);
+            setEditCondition(undefined);
             open();
           }}
         >
@@ -73,9 +58,14 @@ export function ProblemList(props: ProblemListProps): JSX.Element {
             <Fragment key={problem.id}>
               <Grid.Col span={2}>{problem.onsetDateTime?.substring(0, 4)}</Grid.Col>
               <Grid.Col span={10}>
-                <Badge key={problem.id} variant="light" maw="100%">
-                  <CodeableConceptDisplay value={problem.code} />
-                </Badge>
+                <ConceptBadge<Condition>
+                  key={problem.id}
+                  resource={problem}
+                  onEdit={(c) => {
+                    setEditCondition(c);
+                    open();
+                  }}
+                />
               </Grid.Col>
             </Fragment>
           ))}
@@ -83,18 +73,8 @@ export function ProblemList(props: ProblemListProps): JSX.Element {
       ) : (
         <Text>(none)</Text>
       )}
-      <Modal opened={opened} onClose={close} title="Add Problem">
-        <Form onSubmit={handleSubmit}>
-          <Stack>
-            <TextInput name="problem" label="Problem" data-autofocus={true} autoFocus required />
-            <TextInput name="onset" label="Dx Date" type="date" required />
-            <NativeSelect name="status" label="Status" data={['active']} />
-            <Textarea name="notes" label="Notes" />
-            <Group justify="flex-end" gap={4} mt="md">
-              <Button type="submit">Save</Button>
-            </Group>
-          </Stack>
-        </Form>
+      <Modal opened={opened} onClose={close} title={editCondition ? 'Edit Problem' : 'Add Problem'}>
+        <ConditionDialog patient={patient} encounter={encounter} condition={editCondition} onSubmit={handleSubmit} />
       </Modal>
     </>
   );

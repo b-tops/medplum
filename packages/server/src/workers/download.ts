@@ -1,10 +1,10 @@
 import { arrayify, crawlResource, isGone, normalizeOperationOutcome, TypedValue } from '@medplum/core';
-import { Attachment, Binary, Meta, Resource } from '@medplum/fhirtypes';
+import { Attachment, Binary, Meta, Resource, ResourceType } from '@medplum/fhirtypes';
 import { Job, Queue, QueueBaseOptions, Worker } from 'bullmq';
 import fetch from 'node-fetch';
 import { Readable } from 'stream';
 import { getConfig, MedplumServerConfig } from '../config';
-import { getRequestContext, RequestContext, requestContextStore } from '../context';
+import { getRequestContext, tryGetRequestContext, tryRunInRequestContext } from '../context';
 import { getSystemRepo } from '../fhir/repo';
 import { getBinaryStorage } from '../fhir/storage';
 import { globalLogger } from '../logger';
@@ -22,11 +22,11 @@ import { parseTraceparent } from '../traceparent';
  */
 
 export interface DownloadJobData {
-  readonly resourceType: string;
+  readonly resourceType: ResourceType;
   readonly id: string;
   readonly url: string;
-  readonly requestId: string;
-  readonly traceId: string;
+  readonly requestId?: string;
+  readonly traceId?: string;
 }
 
 const queueName = 'DownloadQueue';
@@ -58,8 +58,7 @@ export function initDownloadWorker(config: MedplumServerConfig): void {
 
   worker = new Worker<DownloadJobData>(
     queueName,
-    (job) =>
-      requestContextStore.run(new RequestContext(job.data.requestId, job.data.traceId), () => execDownloadJob(job)),
+    (job) => tryRunInRequestContext(job.data.requestId, job.data.traceId, () => execDownloadJob(job)),
     {
       ...defaultOptions,
       ...config.bullmq,
@@ -110,15 +109,15 @@ export function getDownloadQueue(): Queue<DownloadJobData> | undefined {
  * @param resource - The resource that was created or updated.
  */
 export async function addDownloadJobs(resource: Resource): Promise<void> {
-  const ctx = getRequestContext();
+  const ctx = tryGetRequestContext();
   for (const attachment of getAttachments(resource)) {
     if (isExternalUrl(attachment.url)) {
       await addDownloadJobData({
         resourceType: resource.resourceType,
         id: resource.id as string,
         url: attachment.url,
-        requestId: ctx.requestId,
-        traceId: ctx.traceId,
+        requestId: ctx?.requestId,
+        traceId: ctx?.traceId,
       });
     }
   }
@@ -148,12 +147,8 @@ function isExternalUrl(url: string | undefined): url is string {
  * @param job - The download job details.
  */
 async function addDownloadJobData(job: DownloadJobData): Promise<void> {
-  const ctx = getRequestContext();
-  ctx.logger.debug(`Adding Download job`);
   if (queue) {
     await queue.add(jobName, job);
-  } else {
-    ctx.logger.debug(`Download queue not initialized`);
   }
 }
 
@@ -161,14 +156,14 @@ async function addDownloadJobData(job: DownloadJobData): Promise<void> {
  * Executes a download job.
  * @param job - The download job details.
  */
-export async function execDownloadJob(job: Job<DownloadJobData>): Promise<void> {
+export async function execDownloadJob<T extends Resource = Resource>(job: Job<DownloadJobData>): Promise<void> {
   const systemRepo = getSystemRepo();
   const ctx = getRequestContext();
   const { resourceType, id, url } = job.data;
 
-  let resource;
+  let resource: T;
   try {
-    resource = await systemRepo.readResource(resourceType, id);
+    resource = await systemRepo.readResource<T>(resourceType, id);
   } catch (err) {
     const outcome = normalizeOperationOutcome(err);
     if (isGone(outcome)) {
@@ -185,9 +180,11 @@ export async function execDownloadJob(job: Job<DownloadJobData>): Promise<void> 
 
   const headers: HeadersInit = {};
   const traceId = job.data.traceId;
-  headers['x-trace-id'] = traceId;
-  if (parseTraceparent(traceId)) {
-    headers['traceparent'] = traceId;
+  if (traceId) {
+    headers['x-trace-id'] = traceId;
+    if (parseTraceparent(traceId)) {
+      headers['traceparent'] = traceId;
+    }
   }
 
   try {
@@ -208,6 +205,9 @@ export async function execDownloadJob(job: Job<DownloadJobData>): Promise<void> 
       contentType,
       meta: {
         project: resource.meta?.project,
+      },
+      securityContext: {
+        reference: `${resource.resourceType}/${resource.id}`,
       },
     });
     if (response.body === null) {

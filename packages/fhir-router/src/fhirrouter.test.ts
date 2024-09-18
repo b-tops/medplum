@@ -5,9 +5,10 @@ import {
   indexSearchParameterBundle,
   indexStructureDefinitionBundle,
   notFound,
+  preconditionFailed,
 } from '@medplum/core';
 import { readJson } from '@medplum/definitions';
-import { Bundle, BundleEntry, OperationOutcome, SearchParameter } from '@medplum/fhirtypes';
+import { Bundle, BundleEntry, OperationOutcome, Patient, SearchParameter } from '@medplum/fhirtypes';
 import { randomUUID } from 'crypto';
 import { FhirRequest, FhirRouter } from './fhirrouter';
 import { FhirRepository, MemoryRepository } from './repo';
@@ -172,6 +173,24 @@ describe('FHIR Router', () => {
     expect(res).toMatchObject(badRequest('Incorrect ID'));
   });
 
+  test('Update incorrect precondition', async () => {
+    const [res] = await router.handleRequest(
+      {
+        method: 'PUT',
+        pathname: '/Patient/123',
+        body: {
+          resourceType: 'Patient',
+          id: '123',
+        },
+        params: {},
+        query: {},
+        headers: { 'if-match': 'W/"test"' },
+      },
+      repo
+    );
+    expect(res).toMatchObject(preconditionFailed);
+  });
+
   test('Search by post', async () => {
     const [res, bundle] = await router.handleRequest(
       {
@@ -187,5 +206,102 @@ describe('FHIR Router', () => {
     );
     expect(res).toMatchObject(allOk);
     expect(bundle).toBeDefined();
+  });
+
+  test('Search multiple types', async () => {
+    const [res, bundle] = await router.handleRequest(
+      {
+        method: 'GET',
+        pathname: '/',
+        body: {},
+        params: {},
+        query: {
+          _type: 'Patient,Observation',
+        },
+      },
+      repo
+    );
+    expect(res).toMatchObject(allOk);
+    expect(bundle).toBeDefined();
+  });
+
+  test('Conditional update', async () => {
+    const mrn = randomUUID();
+    const patient: Patient = {
+      resourceType: 'Patient',
+      identifier: [{ system: 'http://example.com/mrn', value: mrn }],
+    };
+    const [res, resource] = await router.handleRequest(
+      {
+        method: 'PUT',
+        pathname: '/Patient',
+        body: patient,
+        params: {},
+        query: {
+          identifier: 'http://example.com/mrn|' + mrn,
+        },
+      },
+      repo
+    );
+    expect(res).toMatchObject(created);
+    expect(resource).toMatchObject(patient);
+  });
+
+  test('Patch resource', async () => {
+    const [res1, patient] = await router.handleRequest(
+      {
+        method: 'POST',
+        pathname: '/Patient',
+        body: {
+          resourceType: 'Patient',
+          name: [{ given: ['John'], family: 'Doe' }],
+        },
+        params: {},
+        query: {},
+      },
+      repo
+    );
+    expect(res1).toMatchObject(created);
+    expect(patient).toBeDefined();
+
+    const [res2, patient2] = await router.handleRequest(
+      {
+        method: 'PATCH',
+        pathname: `/Patient/${patient?.id}`,
+        body: [{ op: 'add', path: '/active', value: true }],
+        params: {},
+        query: {},
+      },
+      repo
+    );
+    expect(res2).toMatchObject(allOk);
+    expect(patient2).toBeDefined();
+    expect((patient2 as Patient).active).toEqual(true);
+
+    const [res3, patient3] = await router.handleRequest(
+      {
+        method: 'PATCH',
+        pathname: `/Patient/${patient?.id}`,
+        body: null,
+        params: {},
+        query: {},
+      },
+      repo
+    );
+    expect(res3).toMatchObject(badRequest('Empty patch body'));
+    expect(patient3).toBeUndefined();
+
+    const [res4, patient4] = await router.handleRequest(
+      {
+        method: 'PATCH',
+        pathname: `/Patient/${patient?.id}`,
+        body: { foo: 'bar' },
+        params: {},
+        query: {},
+      },
+      repo
+    );
+    expect(res4).toMatchObject(badRequest('Patch body must be an array'));
+    expect(patient4).toBeUndefined();
   });
 });

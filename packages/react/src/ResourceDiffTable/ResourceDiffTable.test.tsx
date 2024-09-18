@@ -1,7 +1,7 @@
 import { Patient } from '@medplum/fhirtypes';
 import { MockClient } from '@medplum/mock';
 import { MedplumProvider } from '@medplum/react-hooks';
-import { act, render, screen, waitFor } from '../test-utils/render';
+import { act, render, screen } from '../test-utils/render';
 import { ResourceDiffTable, ResourceDiffTableProps } from './ResourceDiffTable';
 
 const medplum = new MockClient();
@@ -20,6 +20,7 @@ describe('ResourceDiffTable', () => {
       resourceType: 'Patient',
       id: '123',
       meta: {
+        author: { reference: 'Practitioner/456' },
         versionId: '456',
       },
       birthDate: '1990-01-01',
@@ -30,6 +31,7 @@ describe('ResourceDiffTable', () => {
       resourceType: 'Patient',
       id: '123',
       meta: {
+        author: { reference: 'Practitioner/457' },
         versionId: '457',
       },
       birthDate: '1990-01-01',
@@ -40,7 +42,7 @@ describe('ResourceDiffTable', () => {
       setup({ original, revised });
     });
 
-    await waitFor(() => screen.getByText('Replace active'));
+    expect(await screen.findByText('Replace active')).toBeInTheDocument();
 
     const removed = screen.getByText('false');
     expect(removed).toBeDefined();
@@ -56,6 +58,10 @@ describe('ResourceDiffTable', () => {
 
     // Birth date did not change, and therefore should not be shown
     expect(screen.queryByText('Birth Date')).toBeNull();
+
+    // Certain meta fields should not be shown
+    expect(screen.queryByText('Author')).toBeNull();
+    expect(screen.queryByText('Version ID')).toBeNull();
   });
 
   test('Array index operations', async () => {
@@ -83,7 +89,7 @@ describe('ResourceDiffTable', () => {
       setup({ original, revised });
     });
 
-    await waitFor(() => screen.getByText('Replace identifier[0].value'));
+    expect(await screen.findByText('Replace identifier[0].value')).toBeInTheDocument();
     expect(screen.getByText('Replace identifier[0].value')).toBeInTheDocument();
     expect(screen.getByText('123')).toBeInTheDocument();
     expect(screen.getByText('123x')).toBeInTheDocument();
@@ -114,7 +120,7 @@ describe('ResourceDiffTable', () => {
       setup({ original, revised });
     });
 
-    await waitFor(() => screen.getByText('Add identifier.last()'));
+    expect(await screen.findByText('Add identifier.last()')).toBeInTheDocument();
 
     const operations = screen.getAllByText('Add identifier.last()');
     expect(operations).toHaveLength(1);
@@ -143,7 +149,7 @@ describe('ResourceDiffTable', () => {
       setup({ original, revised });
     });
 
-    await waitFor(() => screen.getByText('Replace identifier'));
+    expect(await screen.findByText('Replace identifier')).toBeInTheDocument();
 
     const operations = screen.getAllByText('Replace identifier');
     expect(operations).toHaveLength(1);
@@ -171,7 +177,7 @@ describe('ResourceDiffTable', () => {
       setup({ original, revised });
     });
 
-    await waitFor(() => screen.getByText('Remove identifier[1]'));
+    expect(await screen.findByText('Remove identifier[1]')).toBeInTheDocument();
 
     const operations = screen.getAllByText('Remove identifier[1]');
     expect(operations).toHaveLength(1);
@@ -200,7 +206,7 @@ describe('ResourceDiffTable', () => {
       setup({ original, revised });
     });
 
-    await waitFor(() => screen.getByText('Replace identifier'));
+    expect(await screen.findByText('Replace identifier')).toBeInTheDocument();
 
     const operations = screen.getAllByText('Replace identifier');
     expect(operations).toHaveLength(1);
@@ -225,7 +231,7 @@ describe('ResourceDiffTable', () => {
       setup({ original, revised });
     });
 
-    await waitFor(() => screen.getByText('Replace photo[0]'));
+    expect(await screen.findByText('Replace photo[0]')).toBeInTheDocument();
 
     // There should be 2 download links
     expect(screen.getAllByText('Download')).toHaveLength(2);

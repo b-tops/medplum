@@ -5,12 +5,12 @@ import {
   Filter,
   getDateProperty,
   getReferenceString,
+  MEDPLUM_CLI_CLIENT_ID,
   OperationOutcomeError,
   Operator,
   ProfileResource,
   resolveId,
   tooManyRequests,
-  unauthorized,
 } from '@medplum/core';
 import {
   AccessPolicy,
@@ -25,9 +25,9 @@ import {
   User,
 } from '@medplum/fhirtypes';
 import bcrypt from 'bcryptjs';
-import { timingSafeEqual } from 'crypto';
 import { JWTPayload, jwtVerify, VerifyOptions } from 'jose';
 import fetch from 'node-fetch';
+import { timingSafeEqual } from 'node:crypto';
 import { authenticator } from 'otplib';
 import { getRequestContext } from '../context';
 import { getAccessPolicyForLogin } from '../fhir/accesspolicy';
@@ -111,10 +111,10 @@ export interface GoogleCredentialClaims extends JWTPayload {
  * @returns The client application.
  */
 export async function getClientApplication(clientId: string): Promise<ClientApplication> {
-  if (clientId === 'medplum-cli') {
+  if (clientId === MEDPLUM_CLI_CLIENT_ID) {
     return {
       resourceType: 'ClientApplication',
-      id: 'medplum-cli',
+      id: MEDPLUM_CLI_CLIENT_ID,
       redirectUri: 'http://localhost:9615',
       pkceOptional: true,
     };
@@ -404,7 +404,7 @@ export async function setLoginMembership(login: Login, membershipId: string): Pr
   }
 
   // Get the access policy
-  const accessPolicy = await getAccessPolicyForLogin(login, membership);
+  const accessPolicy = await getAccessPolicyForLogin(project, login, membership);
 
   // Check IP Access Rules
   await checkIpAccessRules(login, accessPolicy);
@@ -412,11 +412,17 @@ export async function setLoginMembership(login: Login, membershipId: string): Pr
   logAuthEvent(LoginEvent, project.id as string, membership.profile, login.remoteAddress, AuditEventOutcome.Success);
 
   // Everything checks out, update the login
-  return systemRepo.updateResource<Login>({
+  const updatedLogin: Login = {
     ...login,
     membership: createReference(membership),
-    superAdmin: project.superAdmin,
-  });
+  };
+
+  if (project.superAdmin) {
+    // Disable refresh tokens for super admins
+    updatedLogin.refreshSecret = undefined;
+  }
+
+  return systemRepo.updateResource<Login>(updatedLogin);
 }
 
 /**
@@ -427,7 +433,7 @@ export async function setLoginMembership(login: Login, membershipId: string): Pr
  * @param login - The candidate login.
  * @param accessPolicy - The access policy for the login.
  */
-async function checkIpAccessRules(login: Login, accessPolicy: AccessPolicy | undefined): Promise<void> {
+export async function checkIpAccessRules(login: Login, accessPolicy: AccessPolicy | undefined): Promise<void> {
   if (!login.remoteAddress || !accessPolicy?.ipAccessRule) {
     return;
   }
@@ -792,8 +798,14 @@ export async function verifyMultipleMatchingException(
  * @param accessToken - The access token as provided by the client.
  * @returns On success, returns the login, membership, and project. On failure, throws an error.
  */
-export async function getLoginForAccessToken(accessToken: string): Promise<AuthState> {
-  const verifyResult = await verifyJwt(accessToken);
+export async function getLoginForAccessToken(accessToken: string): Promise<AuthState | undefined> {
+  let verifyResult: Awaited<ReturnType<typeof verifyJwt>>;
+  try {
+    verifyResult = await verifyJwt(accessToken);
+  } catch (err) {
+    return undefined;
+  }
+
   const claims = verifyResult.payload as MedplumAccessTokenClaims;
 
   const systemRepo = getSystemRepo();
@@ -801,11 +813,11 @@ export async function getLoginForAccessToken(accessToken: string): Promise<AuthS
   try {
     login = await systemRepo.readResource<Login>('Login', claims.login_id);
   } catch (err) {
-    throw new OperationOutcomeError(unauthorized);
+    return undefined;
   }
 
   if (!login?.membership || login.revoked) {
-    throw new OperationOutcomeError(unauthorized);
+    return undefined;
   }
 
   const membership = await systemRepo.readReference<ProjectMembership>(login.membership);

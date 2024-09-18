@@ -1,15 +1,17 @@
 import { normalizeOperationOutcome } from '@medplum/core';
-import { Attachment, Binary, OperationOutcome } from '@medplum/fhirtypes';
+import { Attachment, OperationOutcome, Reference } from '@medplum/fhirtypes';
 import { useMedplum } from '@medplum/react-hooks';
 import { ChangeEvent, MouseEvent, ReactNode, useRef } from 'react';
 import { killEvent } from '../utils/dom';
 
 export interface AttachmentButtonProps {
+  readonly securityContext?: Reference;
   readonly onUpload: (attachment: Attachment) => void;
   readonly onUploadStart?: () => void;
   readonly onUploadProgress?: (e: ProgressEvent) => void;
   readonly onUploadError?: (outcome: OperationOutcome) => void;
-  children(props: { onClick(e: MouseEvent): void }): ReactNode;
+  children(props: { disabled?: boolean; onClick(e: MouseEvent): void }): ReactNode;
+  readonly disabled?: boolean;
 }
 
 export function AttachmentButton(props: AttachmentButtonProps): JSX.Element {
@@ -47,17 +49,15 @@ export function AttachmentButton(props: AttachmentButtonProps): JSX.Element {
       props.onUploadStart();
     }
 
-    const filename = file.name;
-    const contentType = file.type || 'application/octet-stream';
     medplum
-      .createBinary(file, filename, contentType, props.onUploadProgress)
-      .then((binary: Binary) => {
-        props.onUpload({
-          contentType: binary.contentType,
-          url: binary.url,
-          title: filename,
-        });
+      .createAttachment({
+        data: file,
+        contentType: file.type || 'application/octet-stream',
+        filename: file.name,
+        securityContext: props.securityContext,
+        onProgress: props.onUploadProgress,
       })
+      .then((attachment: Attachment) => props.onUpload(attachment))
       .catch((err) => {
         if (props.onUploadError) {
           props.onUploadError(normalizeOperationOutcome(err));
@@ -68,13 +68,14 @@ export function AttachmentButton(props: AttachmentButtonProps): JSX.Element {
   return (
     <>
       <input
+        disabled={props.disabled}
         type="file"
         data-testid="upload-file-input"
         style={{ display: 'none' }}
         ref={fileInputRef}
         onChange={(e) => onFileChange(e)}
       />
-      {props.children({ onClick })}
+      {props.children({ onClick, disabled: props.disabled })}
     </>
   );
 }

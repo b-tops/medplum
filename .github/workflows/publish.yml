@@ -8,6 +8,7 @@ jobs:
   build_and_check:
     name: publish
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       NODE_VERSION: '20'
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -21,16 +22,16 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           registry-url: 'https://registry.npmjs.org'
 
       - name: Cache node modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         env:
           cache-name: cache-node-modules
         with:
@@ -93,8 +94,9 @@ jobs:
 
   build_agent_win64:
     runs-on: windows-latest
+    timeout-minutes: 45
     env:
-      NODE_VERSION: '20'
+      NODE_VERSION: '18'
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
       TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
       TURBO_REMOTE_ONLY: ${{ secrets.TURBO_REMOTE_ONLY }}
@@ -103,7 +105,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install NSIS
         run: choco install nsis
@@ -118,9 +120,9 @@ jobs:
           java-version: '17'
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 18
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
@@ -168,8 +170,9 @@ jobs:
 
   build_agent_linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
-      NODE_VERSION: '20'
+      NODE_VERSION: '18'
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
       TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
       TURBO_REMOTE_ONLY: ${{ secrets.TURBO_REMOTE_ONLY }}
@@ -178,12 +181,12 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 18
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies

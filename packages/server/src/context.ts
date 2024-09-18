@@ -1,9 +1,12 @@
-import { LogLevel, Logger, ProfileResource, isUUID } from '@medplum/core';
-import { Login, Project, ProjectMembership, Reference } from '@medplum/fhirtypes';
+import { LogLevel, Logger, ProfileResource, isUUID, parseLogLevel } from '@medplum/core';
+import { Extension, Login, Project, ProjectMembership, Reference } from '@medplum/fhirtypes';
 import { AsyncLocalStorage } from 'async_hooks';
 import { randomUUID } from 'crypto';
 import { NextFunction, Request, Response } from 'express';
+import { getConfig } from './config';
+import { getRepoForLogin } from './fhir/accesspolicy';
 import { Repository, getSystemRepo } from './fhir/repo';
+import { authenticateTokenImpl, isExtendedMode } from './oauth/middleware';
 import { parseTraceparent } from './traceparent';
 
 export class RequestContext {
@@ -14,9 +17,7 @@ export class RequestContext {
   constructor(requestId: string, traceId: string, logger?: Logger) {
     this.requestId = requestId;
     this.traceId = traceId;
-    this.logger =
-      logger ??
-      new Logger(write, { requestId, traceId }, process.env.NODE_ENV === 'test' ? LogLevel.ERROR : LogLevel.INFO);
+    this.logger = logger ?? new Logger(write, { requestId, traceId }, parseLogLevel(getConfig().logLevel ?? 'info'));
   }
 
   close(): void {
@@ -27,6 +28,8 @@ export class RequestContext {
     return new RequestContext('', '');
   }
 }
+
+const systemLogger = new Logger(write, undefined, LogLevel.ERROR);
 
 export class AuthenticatedRequestContext extends RequestContext {
   readonly repo: Repository;
@@ -42,10 +45,9 @@ export class AuthenticatedRequestContext extends RequestContext {
     project: Project,
     membership: ProjectMembership,
     repo: Repository,
-    logger?: Logger,
     accessToken?: string
   ) {
-    super(ctx.requestId, ctx.traceId, logger);
+    super(ctx.requestId, ctx.traceId, ctx.logger);
 
     this.repo = repo;
     this.project = project;
@@ -60,19 +62,21 @@ export class AuthenticatedRequestContext extends RequestContext {
   }
 
   static system(ctx?: { requestId?: string; traceId?: string }): AuthenticatedRequestContext {
-    const systemLogger = new Logger(write, undefined, LogLevel.ERROR);
     return new AuthenticatedRequestContext(
-      new RequestContext(ctx?.requestId ?? '', ctx?.traceId ?? ''),
+      new RequestContext(ctx?.requestId ?? '', ctx?.traceId ?? '', systemLogger),
       {} as unknown as Login,
       {} as unknown as Project,
       {} as unknown as ProjectMembership,
-      getSystemRepo(),
-      systemLogger
+      getSystemRepo()
     );
   }
 }
 
 export const requestContextStore = new AsyncLocalStorage<RequestContext>();
+
+export function tryGetRequestContext(): RequestContext | undefined {
+  return requestContextStore.getStore();
+}
 
 export function getRequestContext(): RequestContext {
   const ctx = requestContextStore.getStore();
@@ -92,7 +96,17 @@ export function getAuthenticatedContext(): AuthenticatedRequestContext {
 
 export async function attachRequestContext(req: Request, res: Response, next: NextFunction): Promise<void> {
   const { requestId, traceId } = requestIds(req);
-  requestContextStore.run(new RequestContext(requestId, traceId), () => next());
+
+  let ctx = new RequestContext(requestId, traceId);
+
+  const authState = await authenticateTokenImpl(req);
+  if (authState) {
+    const { login, membership, project, accessToken } = authState;
+    const repo = await getRepoForLogin(login, membership, project, isExtendedMode(req));
+    ctx = new AuthenticatedRequestContext(ctx, login, project, membership, repo, accessToken);
+  }
+
+  requestContextStore.run(ctx, () => next());
 }
 
 export function closeRequestContext(): void {
@@ -102,23 +116,60 @@ export function closeRequestContext(): void {
   }
 }
 
-const traceIdHeaderMap: {
-  [key: string]: (traceId: string) => boolean;
-} = {
-  'x-trace-id': (value) => isUUID(value),
-  traceparent: (value) => !!parseTraceparent(value),
-} as const;
-const traceIdHeaders = Object.entries(traceIdHeaderMap);
+export function getLogger(): Logger {
+  const ctx = requestContextStore.getStore();
+  return ctx ? ctx.logger : systemLogger;
+}
 
-const getTraceId = (req: Request): string | undefined => {
-  for (const [headerKey, isTraceId] of traceIdHeaders) {
-    const value = req.header(headerKey);
-    if (value && isTraceId(value)) {
-      return value;
-    }
+export function tryRunInRequestContext<T>(requestId: string | undefined, traceId: string | undefined, fn: () => T): T {
+  if (requestId && traceId) {
+    return requestContextStore.run(new RequestContext(requestId, traceId), fn);
+  } else {
+    return fn();
   }
+}
+
+export function getTraceId(req: Request): string | undefined {
+  const xTraceId = req.header('x-trace-id');
+  if (xTraceId && isUUID(xTraceId)) {
+    return xTraceId;
+  }
+
+  const traceparent = req.header('traceparent');
+  if (traceparent && parseTraceparent(traceparent)) {
+    return traceparent;
+  }
+
   return undefined;
-};
+}
+
+export function buildTracingExtension(): Extension[] | undefined {
+  const ctx = tryGetRequestContext();
+
+  if (ctx === undefined) {
+    return undefined;
+  }
+
+  const subExtensions: Extension[] = [];
+  if (ctx.requestId) {
+    subExtensions.push({ url: 'requestId', valueId: ctx.requestId });
+  }
+
+  if (ctx.traceId) {
+    subExtensions.push({ url: 'traceId', valueId: ctx.traceId });
+  }
+
+  if (subExtensions.length === 0) {
+    return undefined;
+  }
+
+  return [
+    {
+      url: 'https://medplum.com/fhir/StructureDefinition/tracing',
+      extension: subExtensions,
+    },
+  ];
+}
 
 function requestIds(req: Request): { requestId: string; traceId: string } {
   const requestId = randomUUID();

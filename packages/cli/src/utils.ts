@@ -1,14 +1,13 @@
 import { ContentType, encodeBase64, MedplumClient } from '@medplum/core';
 import { Bot, Extension, OperationOutcome } from '@medplum/fhirtypes';
-import { createHmac, createPrivateKey, randomBytes } from 'crypto';
-import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { SignJWT } from 'jose';
-import { basename, extname, resolve } from 'path';
-import internal from 'stream';
-import tar from 'tar';
+import { createHmac, createPrivateKey, randomBytes } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, extname, resolve } from 'node:path';
+import { extract } from 'tar';
 import { FileSystemStorage } from './storage';
 
-interface MedplumConfig {
+export interface MedplumConfig {
   baseUrl?: string;
   clientId?: string;
   googleClientId?: string;
@@ -17,7 +16,7 @@ interface MedplumConfig {
   bots?: MedplumBotConfig[];
 }
 
-interface MedplumBotConfig {
+export interface MedplumBotConfig {
   readonly name: string;
   readonly id: string;
   readonly source: string;
@@ -53,19 +52,15 @@ export async function saveBot(medplum: MedplumClient, botConfig: MedplumBotConfi
     return;
   }
 
-  try {
-    console.log('Saving source code...');
-    const sourceCode = await medplum.createAttachment(code, basename(codePath), getCodeContentType(codePath));
+  console.log('Saving source code...');
+  const sourceCode = await medplum.createAttachment(code, basename(codePath), getCodeContentType(codePath));
 
-    console.log('Updating bot.....');
-    const updateResult = await medplum.updateResource({
-      ...bot,
-      sourceCode,
-    });
-    console.log('Success! New bot version: ' + updateResult.meta?.versionId);
-  } catch (err) {
-    console.log('Update error: ', err);
-  }
+  console.log('Updating bot...');
+  const updateResult = await medplum.updateResource({
+    ...bot,
+    sourceCode,
+  });
+  console.log('Success! New bot version: ' + updateResult.meta?.versionId);
 }
 
 export async function deployBot(medplum: MedplumClient, botConfig: MedplumBotConfig, bot: Bot): Promise<void> {
@@ -75,16 +70,12 @@ export async function deployBot(medplum: MedplumClient, botConfig: MedplumBotCon
     return;
   }
 
-  try {
-    console.log('Deploying bot...');
-    const deployResult = (await medplum.post(medplum.fhirUrl('Bot', bot.id as string, '$deploy'), {
-      code,
-      filename: basename(codePath),
-    })) as OperationOutcome;
-    console.log('Deploy result: ' + deployResult.issue?.[0]?.details?.text);
-  } catch (err) {
-    console.log('Deploy error: ', err);
-  }
+  console.log('Deploying bot...');
+  const deployResult = (await medplum.post(medplum.fhirUrl('Bot', bot.id as string, '$deploy'), {
+    code,
+    filename: basename(codePath),
+  })) as OperationOutcome;
+  console.log('Deploy result: ' + deployResult.issue?.[0]?.details?.text);
 }
 
 export async function createBot(
@@ -96,30 +87,27 @@ export async function createBot(
   runtimeVersion?: string,
   writeConfig?: boolean
 ): Promise<void> {
-  try {
-    const body = {
-      name: botName,
-      description: '',
-      runtimeVersion,
-    };
-    const newBot = await medplum.post('admin/projects/' + projectId + '/bot', body);
-    const bot = await medplum.readResource('Bot', newBot.id);
+  const body = {
+    name: botName,
+    description: '',
+    runtimeVersion,
+  };
+  const newBot = await medplum.post('admin/projects/' + projectId + '/bot', body);
+  const bot = await medplum.readResource('Bot', newBot.id);
 
-    const botConfig = {
-      name: botName,
-      id: newBot.id,
-      source: sourceFile,
-      dist: distFile,
-    };
-    await saveBot(medplum, botConfig as MedplumBotConfig, bot);
-    await deployBot(medplum, botConfig as MedplumBotConfig, bot);
-    console.log(`Success! Bot created: ${bot.id}`);
+  const botConfig = {
+    name: botName,
+    id: newBot.id,
+    source: sourceFile,
+    dist: distFile,
+  };
 
-    if (writeConfig) {
-      addBotToConfig(botConfig);
-    }
-  } catch (err) {
-    console.log('Error while creating new bot: ' + err);
+  await saveBot(medplum, botConfig as MedplumBotConfig, bot);
+  await deployBot(medplum, botConfig as MedplumBotConfig, bot);
+  console.log(`Success! Bot created: ${bot.id}`);
+
+  if (writeConfig) {
+    addBotToConfig(botConfig);
   }
 }
 
@@ -135,16 +123,19 @@ export function readBotConfigs(botName: string): MedplumBotConfig[] {
 /**
  * Returns the config file name.
  * @param tagName - Optional environment tag name.
- * @param server - Optional server flag.
+ * @param options - Optional command line options.
  * @returns The config file name.
  */
-export function getConfigFileName(tagName?: string, server = false): string {
+export function getConfigFileName(tagName?: string, options?: Record<string, any>): string {
+  if (options?.file) {
+    return options.file;
+  }
   const parts = ['medplum'];
   if (tagName) {
     parts.push(tagName);
   }
   parts.push('config');
-  if (server) {
+  if (options?.server) {
     parts.push('server');
   }
   parts.push('json');
@@ -160,8 +151,17 @@ export function writeConfig(configFileName: string, config: Record<string, any>)
   writeFileSync(resolve(configFileName), JSON.stringify(config, undefined, 2), 'utf-8');
 }
 
-export function readConfig(tagName?: string, server = false): MedplumConfig | undefined {
-  const content = readFileContents(getConfigFileName(tagName, server));
+export function readConfig(tagName?: string, options?: { file?: string }): MedplumConfig | undefined {
+  const fileName = getConfigFileName(tagName, options);
+  const content = readFileContents(fileName);
+  if (!content) {
+    return undefined;
+  }
+  return JSON.parse(content);
+}
+
+export function readServerConfig(tagName?: string): Record<string, string | number> | undefined {
+  const content = readFileContents(getConfigFileName(tagName, { server: true }));
   if (!content) {
     return undefined;
   }
@@ -169,7 +169,7 @@ export function readConfig(tagName?: string, server = false): MedplumConfig | un
 }
 
 function readFileContents(fileName: string): string {
-  const path = resolve(process.cwd(), fileName);
+  const path = resolve(fileName);
   if (!existsSync(path)) {
     return '';
   }
@@ -199,14 +199,14 @@ function escapeRegex(str: string): string {
  * @param destinationDir - The destination directory where all files will be extracted.
  * @returns A tar file extractor.
  */
-export function safeTarExtractor(destinationDir: string): internal.Writable {
+export function safeTarExtractor(destinationDir: string): NodeJS.WritableStream {
   const MAX_FILES = 100;
   const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
   let fileCount = 0;
   let totalSize = 0;
 
-  return tar.x({
+  return extract({
     cwd: destinationDir,
     filter: (_path, entry) => {
       fileCount++;
@@ -221,7 +221,9 @@ export function safeTarExtractor(destinationDir: string): internal.Writable {
 
       return true;
     },
-  });
+
+    // Temporary cast for tar issue: https://github.com/isaacs/node-tar/issues/409
+  }) as ReturnType<typeof extract> & NodeJS.WritableStream;
 }
 
 export function getUnsupportedExtension(): Extension {
@@ -246,7 +248,6 @@ export function saveProfile(profileName: string, options: Profile): Profile {
   const storage = new FileSystemStorage(profileName);
   const optionsObject = { name: profileName, ...options };
   storage.setObject('options', optionsObject);
-  console.log(`${profileName} profile created`);
   return optionsObject;
 }
 

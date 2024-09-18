@@ -20,10 +20,12 @@ import { JWTVerifyOptions, createRemoteJWKSet, jwtVerify } from 'jose';
 import { asyncWrap } from '../async';
 import { getProjectIdByClientId } from '../auth/utils';
 import { getConfig } from '../config';
+import { getAccessPolicyForLogin } from '../fhir/accesspolicy';
 import { getSystemRepo } from '../fhir/repo';
 import { getTopicForUser } from '../fhircast/utils';
 import { MedplumRefreshTokenClaims, generateSecret, verifyJwt } from './keys';
 import {
+  checkIpAccessRules,
   getAuthTokens,
   getClientApplication,
   getClientApplicationMembership,
@@ -135,9 +137,18 @@ async function handleClientCredentials(req: Request, res: Response): Promise<voi
     membership: createReference(membership),
     authTime: new Date().toISOString(),
     granted: true,
-    superAdmin: project.superAdmin,
     scope,
+    remoteAddress: req.ip,
+    userAgent: req.get('User-Agent'),
   });
+
+  try {
+    const accessPolicy = await getAccessPolicyForLogin(project, login, membership);
+    await checkIpAccessRules(login, accessPolicy);
+  } catch (err) {
+    sendTokenError(res, 'invalid_request', normalizeErrorString(err));
+    return;
+  }
 
   await sendTokenResponse(res, login, membership);
 }
@@ -202,13 +213,15 @@ async function handleAuthorizationCode(req: Request, res: Response): Promise<voi
   }
 
   let client: ClientApplication | undefined;
-  if (clientId) {
-    try {
+  try {
+    if (clientId) {
       client = await getClientApplication(clientId);
-    } catch (err) {
-      sendTokenError(res, 'invalid_request', 'Invalid client');
-      return;
+    } else if (login.client) {
+      client = await getClientApplication(resolveId(login.client) as string);
     }
+  } catch (err) {
+    sendTokenError(res, 'invalid_request', 'Invalid client');
+    return;
   }
 
   if (clientSecret) {
@@ -569,7 +582,13 @@ async function sendTokenResponse(res: Response, login: Login, membership: Projec
   const fhircastProps = {} as FhircastProps;
   if (login.scope?.includes('fhircast/')) {
     const userId = resolveId(login.user) as string;
-    const topic = await getTopicForUser(userId);
+    let topic: string;
+    try {
+      topic = await getTopicForUser(userId);
+    } catch (err: unknown) {
+      sendTokenError(res, normalizeErrorString(err));
+      return;
+    }
     fhircastProps['hub.url'] = config.baseUrl + 'fhircast/STU3/'; // TODO: Figure out how to handle the split between STU2 and STU3...
     fhircastProps['hub.topic'] = topic;
   }

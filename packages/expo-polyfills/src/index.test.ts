@@ -2,36 +2,7 @@ import { MemoryStorage } from '@medplum/core';
 import { subtle, webcrypto } from 'node:crypto';
 import { Platform } from 'react-native';
 import { TextDecoder, TextEncoder } from 'text-encoding';
-import { ExpoClientStorage, cleanupMedplumWebAPIs, polyfillMedplumWebAPIs } from '.';
-
-const originalWindow = window;
-
-beforeAll(() => {
-  Object.defineProperty(globalThis, 'window', {
-    value: { ...originalWindow },
-  });
-});
-
-afterAll(() => {
-  Object.defineProperty(globalThis, 'window', {
-    value: originalWindow,
-  });
-});
-
-jest.mock('expo-secure-store', () => {
-  const store = new Map<string, string>();
-  return {
-    setItemAsync: async (key: string, value: string): Promise<void> => {
-      store.set(key, value);
-    },
-    getItemAsync: async (key: string): Promise<string | null> => {
-      return Promise.resolve(store.get(key) ?? null);
-    },
-    deleteItemAsync: async (key: string): Promise<void> => {
-      store.delete(key);
-    },
-  };
-});
+import { cleanupMedplumWebAPIs, polyfillMedplumWebAPIs } from '.';
 
 if (Platform.OS === 'web') {
   // Polyfill the globals that should be there on web but are missing from jsdom for some reason
@@ -49,11 +20,19 @@ if (Platform.OS === 'web') {
 }
 
 describe('polyfillMedplumWebAPIs', () => {
+  const originalWindow = globalThis.window;
+
   beforeAll(() => {
+    Object.defineProperty(globalThis, 'window', {
+      value: { ...originalWindow },
+    });
     polyfillMedplumWebAPIs();
   });
 
   afterAll(() => {
+    Object.defineProperty(globalThis, 'window', {
+      value: originalWindow,
+    });
     cleanupMedplumWebAPIs();
   });
 
@@ -101,8 +80,6 @@ describe('polyfillMedplumWebAPIs', () => {
       expect(window.crypto.subtle).toBeDefined();
       expect(window.crypto.subtle.digest).toBeDefined();
     });
-
-    // TODO: Add a test for `digest`
   });
 
   describe('Location', () => {
@@ -130,61 +107,6 @@ describe('polyfillMedplumWebAPIs', () => {
     test('Should be able to be set and read from', () => {
       expect(() => window.sessionStorage.setItem('med', 'plum')).not.toThrow();
       expect(window.sessionStorage.getItem('med')).toBe('plum');
-    });
-  });
-
-  describe('ExpoClientStorage', () => {
-    let clientStorage: ExpoClientStorage;
-
-    test('Using storage before initialized should throw', () => {
-      clientStorage = new ExpoClientStorage();
-      if (Platform.OS !== 'web') {
-        expect(() => clientStorage.getObject('test')).toThrow();
-      }
-    });
-
-    test('Waiting for initialized', async () => {
-      await clientStorage.getInitPromise();
-      expect(() => clientStorage.getObject('test')).not.toThrow();
-    });
-
-    test('Setting an string', async () => {
-      clientStorage.setString('bestEhr', 'medplum');
-      expect(clientStorage.length).toBeDefined();
-      expect(clientStorage.length).toBe(1);
-    });
-
-    test('Getting a string', () => {
-      expect(clientStorage.getString('bestEhr')).toEqual('medplum');
-    });
-
-    test('Setting an object', async () => {
-      clientStorage.setObject('bestEhr', { med: 'plum' });
-      expect(clientStorage.length).toBeDefined();
-      expect(clientStorage.length).toBe(1);
-    });
-
-    test('Getting an object', () => {
-      expect(clientStorage.getObject('bestEhr')).toEqual({ med: 'plum' });
-    });
-
-    test('Making a new storage should fetch existing keys', async () => {
-      const newStorage = new ExpoClientStorage();
-      await newStorage.getInitPromise();
-      // Assert size
-      expect(newStorage.length).toEqual(1);
-    });
-
-    test('Clearing storage should empty it', () => {
-      clientStorage.clear();
-      expect(clientStorage.length).toEqual(0);
-    });
-
-    test('After clearing, new storages should not get previous keys', async () => {
-      const newStorage = new ExpoClientStorage();
-      await newStorage.getInitPromise();
-      // Assert size is 0
-      expect(newStorage.length).toEqual(0);
     });
   });
 });

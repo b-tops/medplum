@@ -1,4 +1,4 @@
-import { createReference, evalFhirPathTyped, getExtension, isResource, Operator, toTypedValue } from '@medplum/core';
+import { createReference, getExtension, isResource, Operator } from '@medplum/core';
 import {
   AuditEvent,
   AuditEventEntity,
@@ -10,7 +10,7 @@ import {
   Resource,
   Subscription,
 } from '@medplum/fhirtypes';
-import { getRequestContext } from '../context';
+import { buildTracingExtension, getLogger } from '../context';
 import { getSystemRepo } from '../fhir/repo';
 import { AuditEventOutcome } from '../util/auditevent';
 
@@ -83,6 +83,7 @@ export async function createAuditEvent(
     entity: createAuditEventEntities(resource, subscription, bot),
     outcome,
     outcomeDesc,
+    extension: buildTracingExtension(),
   });
 }
 
@@ -108,24 +109,7 @@ export function getAuditEventEntityRole(resource: Resource): Coding {
   }
 }
 
-export async function isFhirCriteriaMet(subscription: Subscription, currentResource: Resource): Promise<boolean> {
-  const criteria = getExtension(
-    subscription,
-    'https://medplum.com/fhir/StructureDefinition/fhir-path-criteria-expression'
-  );
-  if (!criteria?.valueString) {
-    return true;
-  }
-  const previous = await getPreviousResource(currentResource);
-  const evalInput = {
-    '%current': toTypedValue(currentResource),
-    '%previous': toTypedValue(previous ?? {}),
-  };
-  const evalValue = evalFhirPathTyped(criteria.valueString, [toTypedValue(currentResource)], evalInput);
-  return evalValue?.[0]?.value === true;
-}
-
-async function getPreviousResource(currentResource: Resource): Promise<Resource | undefined> {
+export async function getPreviousResource(currentResource: Resource): Promise<Resource | undefined> {
   const systemRepo = getSystemRepo();
   const history = await systemRepo.readHistory(currentResource.resourceType, currentResource?.id as string);
 
@@ -158,7 +142,7 @@ export function isJobSuccessful(subscription: Subscription, status: number): boo
       const lowerBound = Number(codeRange[0]);
       const upperBound = Number(codeRange[1]);
       if (!(Number.isInteger(lowerBound) && Number.isInteger(upperBound))) {
-        getRequestContext().logger.debug(
+        getLogger().debug(
           `${lowerBound} and ${upperBound} aren't an integer, configured status codes need to be changed. Resorting to default codes`
         );
         return defaultStatusCheck(status);
@@ -169,7 +153,7 @@ export function isJobSuccessful(subscription: Subscription, status: number): boo
     } else {
       const codeValue = Number(code);
       if (!Number.isInteger(codeValue)) {
-        getRequestContext().logger.debug(
+        getLogger().debug(
           `${code} isn't an integer, configured status codes need to be changed. Resorting to default codes`
         );
         return defaultStatusCheck(status);

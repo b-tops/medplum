@@ -47,10 +47,12 @@ export interface MedplumSourceInfraConfig {
   rdsReaderInstanceType?: ValueOrExternalSecret<string>;
   rdsProxyEnabled?: ValueOrExternalSecret<boolean>;
   cacheNodeType?: ValueOrExternalSecret<string>;
+  cacheSecurityGroupId?: ValueOrExternalSecret<string>;
   desiredServerCount: ValueOrExternalSecret<number>;
   serverImage: ValueOrExternalSecret<string>;
   serverMemory: ValueOrExternalSecret<number>;
   serverCpu: ValueOrExternalSecret<number>;
+  loadBalancerSecurityGroupId?: ValueOrExternalSecret<string>;
   loadBalancerLoggingBucket?: ValueOrExternalSecret<string>;
   loadBalancerLoggingPrefix?: ValueOrExternalSecret<string>;
   clamscanEnabled: ValueOrExternalSecret<boolean>;
@@ -74,6 +76,13 @@ export interface MedplumSourceInfraConfig {
     logGroupCreate?: ValueOrExternalSecret<boolean>;
     snsTopicArn?: ValueOrExternalSecret<string>;
     snsTopicName?: ValueOrExternalSecret<string>;
+  };
+  fargateAutoScaling?: {
+    minCapacity: ValueOrExternalSecret<number>;
+    maxCapacity: ValueOrExternalSecret<number>;
+    targetUtilizationPercent: ValueOrExternalSecret<number>;
+    scaleInCooldown: ValueOrExternalSecret<number>;
+    scaleOutCooldown: ValueOrExternalSecret<number>;
   };
   environment?: StringMap;
 }
@@ -110,10 +119,12 @@ export interface MedplumInfraConfig {
   rdsReaderInstanceType?: string;
   rdsProxyEnabled?: boolean;
   cacheNodeType?: string;
+  cacheSecurityGroupId?: string;
   desiredServerCount: number;
   serverImage: string;
   serverMemory: number;
   serverCpu: number;
+  loadBalancerSecurityGroupId?: string;
   loadBalancerLoggingBucket?: string;
   loadBalancerLoggingPrefix?: string;
   clamscanEnabled: boolean;
@@ -137,6 +148,13 @@ export interface MedplumInfraConfig {
     logGroupCreate?: boolean;
     snsTopicArn?: string;
     snsTopicName?: string;
+  };
+  fargateAutoScaling?: {
+    minCapacity: number;
+    maxCapacity: number;
+    targetUtilizationPercent: number;
+    scaleInCooldown: number;
+    scaleOutCooldown: number;
   };
   environment?: StringMap;
 }

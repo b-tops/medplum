@@ -1,4 +1,4 @@
-import { createReference, getReferenceString, ProfileResource, sleep } from '@medplum/core';
+import { createReference, getReferenceString, sleep } from '@medplum/core';
 import {
   AccessPolicy,
   AsyncJob,
@@ -8,115 +8,160 @@ import {
   Project,
   ProjectMembership,
   Resource,
-  User,
 } from '@medplum/fhirtypes';
 import { randomUUID } from 'crypto';
 import { Express } from 'express';
+import internal from 'stream';
 import request from 'supertest';
-import { inviteUser } from './admin/invite';
+import { ServerInviteResponse, inviteUser } from './admin/invite';
 import { AuthenticatedRequestContext, requestContextStore } from './context';
-import { getSystemRepo } from './fhir/repo';
+import { Repository, getSystemRepo } from './fhir/repo';
 import { generateAccessToken } from './oauth/keys';
 import { tryLogin } from './oauth/utils';
 
-export async function createTestProject(
-  projectOptions?: Partial<Project>,
-  membershipOptions?: Partial<ProjectMembership>
-): Promise<{
+export interface TestProjectOptions {
+  project?: Partial<Project>;
+  accessPolicy?: Partial<AccessPolicy>;
+  membership?: Partial<ProjectMembership>;
+  superAdmin?: boolean;
+  withClient?: boolean;
+  withAccessToken?: boolean;
+  withRepo?: boolean;
+}
+
+type Exact<T, U extends T> = T & Record<Exclude<keyof U, keyof T>, never>;
+type StrictTestProjectOptions<T extends TestProjectOptions> = Exact<TestProjectOptions, T>;
+
+export type TestProjectResult<T extends TestProjectOptions> = {
   project: Project;
-  client: ClientApplication;
-  membership: ProjectMembership;
-  login: Login;
-  accessToken: string;
-}> {
-  requestContextStore.enterWith(AuthenticatedRequestContext.system());
+  accessPolicy: T['accessPolicy'] extends Partial<AccessPolicy> ? AccessPolicy : undefined;
+  client: T['withClient'] extends true ? ClientApplication : undefined;
+  membership: T['withClient'] extends true ? ProjectMembership : undefined;
+  login: T['withAccessToken'] extends true ? Login : undefined;
+  accessToken: T['withAccessToken'] extends true ? string : undefined;
+  repo: T['withRepo'] extends true ? Repository : undefined;
+};
 
-  const systemRepo = getSystemRepo();
+export async function createTestProject<T extends StrictTestProjectOptions<T> = TestProjectOptions>(
+  options?: T
+): Promise<TestProjectResult<T>> {
+  return requestContextStore.run(AuthenticatedRequestContext.system(), async () => {
+    const systemRepo = getSystemRepo();
 
-  const project = await systemRepo.createResource<Project>({
-    resourceType: 'Project',
-    name: 'Test Project',
-    owner: {
-      reference: 'User/' + randomUUID(),
-    },
-    strictMode: true,
-    features: ['bots', 'email', 'graphql-introspection', 'cron'],
-    secret: [
-      {
-        name: 'foo',
-        valueString: 'bar',
+    const project = await systemRepo.createResource<Project>({
+      resourceType: 'Project',
+      name: 'Test Project',
+      owner: {
+        reference: 'User/' + randomUUID(),
       },
-    ],
-    ...projectOptions,
+      strictMode: true,
+      features: ['bots', 'email', 'graphql-introspection', 'cron'],
+      secret: [
+        {
+          name: 'foo',
+          valueString: 'bar',
+        },
+      ],
+      superAdmin: options?.superAdmin,
+      ...options?.project,
+    });
+
+    let client: ClientApplication | undefined = undefined;
+    let accessPolicy: AccessPolicy | undefined = undefined;
+    let membership: ProjectMembership | undefined = undefined;
+    let login: Login | undefined = undefined;
+    let accessToken: string | undefined = undefined;
+    let repo: Repository | undefined = undefined;
+
+    if (options?.withClient || options?.withAccessToken || options?.withRepo) {
+      client = await systemRepo.createResource<ClientApplication>({
+        resourceType: 'ClientApplication',
+        secret: randomUUID(),
+        redirectUri: 'https://example.com/',
+        meta: {
+          project: project.id as string,
+        },
+        name: 'Test Client Application',
+      });
+
+      if (options?.accessPolicy) {
+        accessPolicy = await systemRepo.createResource<AccessPolicy>({
+          resourceType: 'AccessPolicy',
+          meta: { project: project.id },
+          ...options.accessPolicy,
+        });
+      }
+
+      membership = await systemRepo.createResource<ProjectMembership>({
+        resourceType: 'ProjectMembership',
+        user: createReference(client),
+        profile: createReference(client),
+        project: createReference(project),
+        accessPolicy: accessPolicy && createReference(accessPolicy),
+        ...options?.membership,
+      });
+
+      if (options?.withAccessToken) {
+        const scope = 'openid';
+
+        login = await systemRepo.createResource<Login>({
+          resourceType: 'Login',
+          authMethod: 'client',
+          user: createReference(client),
+          client: createReference(client),
+          membership: createReference(membership),
+          authTime: new Date().toISOString(),
+          scope,
+        });
+
+        accessToken = await generateAccessToken({
+          login_id: login.id as string,
+          sub: client.id as string,
+          username: client.id as string,
+          client_id: client.id as string,
+          profile: client.resourceType + '/' + client.id,
+          scope,
+        });
+      }
+
+      if (options?.withRepo) {
+        repo = new Repository({
+          projects: [project.id as string],
+          author: createReference(client),
+          superAdmin: options?.superAdmin,
+          projectAdmin: options?.membership?.admin,
+          accessPolicy,
+          strictMode: project.strictMode,
+          extendedMode: true,
+          checkReferencesOnWrite: project.checkReferencesOnWrite,
+        });
+      }
+    }
+
+    return {
+      project,
+      accessPolicy,
+      client,
+      membership,
+      login,
+      accessToken,
+      repo,
+    } as TestProjectResult<T>;
   });
-
-  const client = await systemRepo.createResource<ClientApplication>({
-    resourceType: 'ClientApplication',
-    secret: randomUUID(),
-    redirectUri: 'https://example.com/',
-    meta: {
-      project: project.id as string,
-    },
-    name: 'Test Client Application',
-  });
-
-  const membership = await systemRepo.createResource<ProjectMembership>({
-    resourceType: 'ProjectMembership',
-    user: createReference(client),
-    profile: createReference(client),
-    project: createReference(project),
-    ...membershipOptions,
-  });
-
-  const scope = 'openid';
-
-  const login = await systemRepo.createResource<Login>({
-    resourceType: 'Login',
-    authMethod: 'client',
-    user: createReference(client),
-    client: createReference(client),
-    membership: createReference(membership),
-    authTime: new Date().toISOString(),
-    superAdmin: projectOptions?.superAdmin,
-    scope,
-  });
-
-  const accessToken = await generateAccessToken({
-    login_id: login.id as string,
-    sub: client.id as string,
-    username: client.id as string,
-    client_id: client.id as string,
-    profile: client.resourceType + '/' + client.id,
-    scope,
-  });
-
-  return {
-    project,
-    client,
-    membership,
-    login,
-    accessToken,
-  };
 }
 
-export async function createTestClient(
-  projectOptions?: Partial<Project>,
-  membershipOptions?: Partial<ProjectMembership>
-): Promise<ClientApplication> {
-  return (await createTestProject(projectOptions, membershipOptions)).client;
+export async function createTestClient(options?: TestProjectOptions): Promise<ClientApplication> {
+  return (await createTestProject({ ...options, withClient: true })).client;
 }
 
-export async function initTestAuth(
-  projectOptions?: Partial<Project>,
-  membershipOptions?: Partial<ProjectMembership>
-): Promise<string> {
-  return (await createTestProject(projectOptions, membershipOptions)).accessToken;
+export async function initTestAuth(options?: TestProjectOptions): Promise<string> {
+  return (await createTestProject({ ...options, withAccessToken: true })).accessToken;
 }
 
 export async function addTestUser(
   project: Project,
   accessPolicy?: AccessPolicy
-): Promise<{ user: User; profile: ProfileResource; accessToken: string }> {
+): Promise<ServerInviteResponse & { accessToken: string }> {
   requestContextStore.enterWith(AuthenticatedRequestContext.system());
   if (accessPolicy) {
     const systemRepo = getSystemRepo();
@@ -128,7 +173,7 @@ export async function addTestUser(
 
   const email = randomUUID() + '@example.com';
   const password = randomUUID();
-  const { user, profile } = await inviteUser({
+  const inviteResponse = await inviteUser({
     project,
     email,
     password,
@@ -140,6 +185,8 @@ export async function addTestUser(
       accessPolicy: accessPolicy && createReference(accessPolicy),
     },
   });
+
+  const { user, profile } = inviteResponse;
 
   const login = await tryLogin({
     authMethod: 'password',
@@ -157,7 +204,7 @@ export async function addTestUser(
     profile: getReferenceString(profile),
   });
 
-  return { user, profile, accessToken };
+  return { ...inviteResponse, accessToken };
 }
 
 /**
@@ -212,7 +259,7 @@ export function waitFor(fn: () => Promise<void>): Promise<void> {
 }
 
 export async function waitForAsyncJob(contentLocation: string, app: Express, accessToken: string): Promise<AsyncJob> {
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 45; i++) {
     const res = await request(app)
       .get(new URL(contentLocation).pathname)
       .set('Authorization', 'Bearer ' + accessToken);
@@ -224,6 +271,22 @@ export async function waitForAsyncJob(contentLocation: string, app: Express, acc
   throw new Error('Async Job did not complete');
 }
 
+const DEFAULT_TEST_CONTEXT = { requestId: 'test-request-id', traceId: 'test-trace-id' };
 export function withTestContext<T>(fn: () => T, ctx?: { requestId?: string; traceId?: string }): T {
-  return requestContextStore.run(AuthenticatedRequestContext.system(ctx), fn);
+  return requestContextStore.run(AuthenticatedRequestContext.system(ctx ?? DEFAULT_TEST_CONTEXT), fn);
+}
+
+/**
+ * Reads a stream into a string.
+ * See: https://stackoverflow.com/a/49428486/2051724
+ * @param stream - The readable stream.
+ * @returns The string contents.
+ */
+export function streamToString(stream: internal.Readable): Promise<string> {
+  const chunks: Buffer[] = [];
+  return new Promise((resolve, reject) => {
+    stream.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+    stream.on('error', (err) => reject(err));
+    stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+  });
 }

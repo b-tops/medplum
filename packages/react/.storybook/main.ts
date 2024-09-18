@@ -4,11 +4,7 @@ import { mergeConfig } from 'vite';
 import path from 'path';
 
 const config: StorybookConfig = {
-  stories: [
-    '../src/stories/Introduction.stories.mdx',
-    '../src/**/*.stories.mdx',
-    '../src/**/*.stories.@(js|jsx|ts|tsx)',
-  ],
+  stories: ['../src/stories/Introduction.mdx', '../src/**/*.mdx', '../src/**/*.stories.@(js|jsx|ts|tsx)'],
   addons: [
     '@storybook/addon-links',
     '@storybook/addon-essentials',
@@ -20,6 +16,7 @@ const config: StorybookConfig = {
         },
       },
     },
+    'storybook-addon-mantine',
   ],
   staticDirs: ['../public'],
   framework: {

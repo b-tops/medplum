@@ -2,6 +2,7 @@ import { readJson } from '@medplum/definitions';
 import { Bundle, Observation, StructureDefinition } from '@medplum/fhirtypes';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
+import { LOINC } from '../constants';
 import { TypedValue } from '../types';
 import {
   InternalSchemaElement,
@@ -15,7 +16,6 @@ import {
   tryGetDataType,
   tryGetProfile,
 } from './types';
-import { LOINC } from '../constants';
 
 describe('FHIR resource and data type representations', () => {
   beforeAll(() => {
@@ -89,6 +89,8 @@ describe('FHIR resource and data type representations', () => {
           },
           min: 1,
           max: 1,
+          description: 'A code that classifies the general type of observation being made.',
+          type: [{ code: 'CodeableConcept' }],
         },
       ],
       ordered: false,
@@ -121,6 +123,8 @@ describe('FHIR resource and data type representations', () => {
           },
           min: 1,
           max: 1,
+          description: 'Used when reporting component observation such as systolic and diastolic blood pressure.',
+          type: [{ code: 'ObservationComponent' }],
         },
         {
           name: 'diastolic',
@@ -142,6 +146,8 @@ describe('FHIR resource and data type representations', () => {
           },
           min: 1,
           max: 1,
+          description: 'Used when reporting component observation such as systolic and diastolic blood pressure.',
+          type: [{ code: 'ObservationComponent' }],
         },
       ],
       ordered: false,

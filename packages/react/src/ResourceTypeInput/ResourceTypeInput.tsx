@@ -8,7 +8,9 @@ export interface ResourceTypeInputProps {
   readonly defaultValue?: ResourceType;
   readonly autoFocus?: boolean;
   readonly testId?: string;
+  readonly maxValues?: number;
   readonly onChange?: (value: ResourceType | undefined) => void;
+  readonly disabled?: boolean;
 }
 
 export function ResourceTypeInput(props: ResourceTypeInputProps): JSX.Element {
@@ -27,6 +29,7 @@ export function ResourceTypeInput(props: ResourceTypeInputProps): JSX.Element {
 
   return (
     <CodeInput
+      disabled={props.disabled}
       data-autofocus={props.autoFocus}
       data-testid={props.testId}
       defaultValue={resourceType}
@@ -35,8 +38,9 @@ export function ResourceTypeInput(props: ResourceTypeInputProps): JSX.Element {
       placeholder={props.placeholder}
       binding="https://medplum.com/fhir/ValueSet/resource-types"
       creatable={false}
-      maxValues={0}
+      maxValues={props.maxValues ?? 1}
       clearable={false}
+      withHelpText={false}
     />
   );
 }

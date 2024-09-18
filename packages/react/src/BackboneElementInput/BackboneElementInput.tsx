@@ -1,54 +1,61 @@
-import { tryGetDataType } from '@medplum/core';
-import { OperationOutcome } from '@medplum/fhirtypes';
+import { ElementsContextType, buildElementsContext, tryGetDataType } from '@medplum/core';
 import { useContext, useMemo, useState } from 'react';
 import { ElementsInput } from '../ElementsInput/ElementsInput';
-import { ElementsContext, buildElementsContext } from '../ElementsInput/ElementsInput.utils';
+import { ElementsContext } from '../ElementsInput/ElementsInput.utils';
+import { maybeWrapWithContext } from '../utils/maybeWrapWithContext';
+import { BaseInputProps } from '../ResourcePropertyInput/ResourcePropertyInput.utils';
+import { AccessPolicyResource } from '@medplum/fhirtypes';
 
-export interface BackboneElementInputProps {
+export interface BackboneElementInputProps extends BaseInputProps {
   /** Type name the backbone element represents */
   readonly typeName: string;
-  /** The path identifies the element and is expressed as a "."-separated list of ancestor elements, beginning with the name of the resource or extension. */
-  readonly path: string;
   /** (optional) The contents of the resource represented by the backbone element */
   readonly defaultValue?: any;
-  /** (optional) OperationOutcome from the last attempted system action*/
-  readonly outcome?: OperationOutcome;
   /** (optional) callback function that is called when the value of the backbone element changes */
   readonly onChange?: (value: any) => void;
   /** (optional) Profile URL of the structure definition represented by the backbone element */
   readonly profileUrl?: string;
+  /**
+   * (optional) If provided, inputs specified in `accessPolicyResource.readonlyFields` are not editable
+   * and inputs specified in `accessPolicyResource.hiddenFields` are not shown.
+   */
+  readonly accessPolicyResource?: AccessPolicyResource;
 }
 
 export function BackboneElementInput(props: BackboneElementInputProps): JSX.Element {
   const [defaultValue] = useState(() => props.defaultValue ?? {});
   const parentElementsContext = useContext(ElementsContext);
-  const profileUrl = props.profileUrl ?? parentElementsContext.profileUrl;
+  const profileUrl = props.profileUrl ?? parentElementsContext?.profileUrl;
   const typeSchema = useMemo(() => tryGetDataType(props.typeName, profileUrl), [props.typeName, profileUrl]);
   const type = typeSchema?.type ?? props.typeName;
 
-  const elementsContext = useMemo(() => {
+  const contextValue: ElementsContextType | undefined = useMemo(() => {
+    if (!typeSchema) {
+      return undefined;
+    }
     return buildElementsContext({
       parentContext: parentElementsContext,
-      elements: typeSchema?.elements,
-      parentPath: props.path,
-      parentType: type,
-      profileUrl,
+      elements: typeSchema.elements,
+      path: props.path,
+      profileUrl: typeSchema.url,
+      accessPolicyResource: props.accessPolicyResource,
     });
-  }, [parentElementsContext, typeSchema?.elements, props.path, type, profileUrl]);
+  }, [typeSchema, parentElementsContext, props.path, props.accessPolicyResource]);
 
   if (!typeSchema) {
     return <div>{type}&nbsp;not implemented</div>;
   }
 
-  return (
-    <ElementsContext.Provider value={elementsContext}>
-      <ElementsInput
-        path={props.path}
-        type={type}
-        defaultValue={defaultValue}
-        onChange={props.onChange}
-        outcome={props.outcome}
-      />
-    </ElementsContext.Provider>
+  return maybeWrapWithContext(
+    ElementsContext.Provider,
+    contextValue,
+    <ElementsInput
+      path={props.path}
+      valuePath={props.valuePath}
+      type={type}
+      defaultValue={defaultValue}
+      onChange={props.onChange}
+      outcome={props.outcome}
+    />
   );
 }

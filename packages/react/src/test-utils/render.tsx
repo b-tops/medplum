@@ -12,15 +12,16 @@ import {
   within,
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { ReactNode } from 'react';
 
 export { act, fireEvent, screen, userEvent, waitFor, within };
 
 const theme = {};
 
-export function render(ui: React.ReactNode): RenderResult {
-  return testingLibraryRender(<>{ui}</>, {
-    wrapper: ({ children }: { children: React.ReactNode }) => (
-      <MantineProvider theme={theme}>{children}</MantineProvider>
+export function render(ui: ReactNode, wrapper?: ({ children }: { children: ReactNode }) => JSX.Element): RenderResult {
+  return testingLibraryRender(ui, {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <MantineProvider theme={theme}>{wrapper ? wrapper({ children }) : children}</MantineProvider>
     ),
   });
 }

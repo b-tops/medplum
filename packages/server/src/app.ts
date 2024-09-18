@@ -15,6 +15,7 @@ import {
   attachRequestContext,
   AuthenticatedRequestContext,
   closeRequestContext,
+  getLogger,
   getRequestContext,
   requestContextStore,
 } from './context';
@@ -31,11 +32,11 @@ import { fhircastSTU2Router, fhircastSTU3Router } from './fhircast/routes';
 import { healthcheckHandler } from './healthcheck';
 import { cleanupHeartbeat, initHeartbeat } from './heartbeat';
 import { hl7BodyParser } from './hl7/parser';
-import { globalLogger } from './logger';
+import { keyValueRouter } from './keyvalue/routes';
 import { initKeys } from './oauth/keys';
 import { oauthRouter } from './oauth/routes';
 import { openApiHandler } from './openapi';
-import { closeRateLimiter } from './ratelimit';
+import { closeRateLimiter, getRateLimiter } from './ratelimit';
 import { closeRedis, initRedis } from './redis';
 import { scimRouter } from './scim/routes';
 import { seedDatabase } from './seed';
@@ -124,11 +125,7 @@ function errorHandler(err: any, req: Request, res: Response, next: NextFunction)
     sendOutcome(res, badRequest('File too large'));
     return;
   }
-  try {
-    getRequestContext().logger.error('Unhandled error', err);
-  } catch {
-    globalLogger.error('Unhandled error', err);
-  }
+  getLogger().error('Unhandled error', err);
   res.status(500).json({ msg: 'Internal Server Error' });
 }
 
@@ -138,12 +135,13 @@ export async function initApp(app: Express, config: MedplumServerConfig): Promis
   initWebSockets(server);
 
   app.set('etag', false);
-  app.set('trust proxy', true);
+  app.set('trust proxy', 1);
   app.set('x-powered-by', false);
   app.use(standardHeaders);
   app.use(cors(corsOptions));
   app.use(compression());
   app.use(attachRequestContext);
+  app.use(getRateLimiter(config));
   app.use('/fhir/R4/Binary', binaryRouter);
   app.use(
     urlencoded({
@@ -157,7 +155,7 @@ export async function initApp(app: Express, config: MedplumServerConfig): Promis
   );
   app.use(
     json({
-      type: [ContentType.JSON, ContentType.FHIR_JSON, ContentType.JSON_PATCH],
+      type: [ContentType.JSON, ContentType.FHIR_JSON, ContentType.JSON_PATCH, ContentType.SCIM_JSON],
       limit: config.maxJsonSize,
     })
   );
@@ -184,6 +182,7 @@ export async function initApp(app: Express, config: MedplumServerConfig): Promis
   apiRouter.use('/fhir/R4/', fhirRouter);
   apiRouter.use('/fhircast/STU2/', fhircastSTU2Router);
   apiRouter.use('/fhircast/STU3/', fhircastSTU3Router);
+  apiRouter.use('/keyvalue/v1/', keyValueRouter);
   apiRouter.use('/oauth2/', oauthRouter);
   apiRouter.use('/scim/v2/', scimRouter);
   apiRouter.use('/storage/', storageRouter);
@@ -208,15 +207,17 @@ export function initAppServices(config: MedplumServerConfig): Promise<void> {
 }
 
 export async function shutdownApp(): Promise<void> {
-  await closeWorkers();
-  await closeDatabase();
   cleanupHeartbeat();
   await closeWebSockets();
-  closeRedis();
+  await closeWorkers();
+  await closeDatabase();
+  await closeRedis();
   closeRateLimiter();
 
   if (server) {
-    server.close();
+    await new Promise((resolve) => {
+      (server as http.Server).close(resolve);
+    });
     server = undefined;
   }
 

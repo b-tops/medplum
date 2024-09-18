@@ -82,18 +82,18 @@ export default function CaseStudiesPage(): JSX.Element {
               youtubeUrl="https://youtu.be/q-22Y7Ox2jY"
             />
             <ProfileCard
-              name="Titan Intake"
-              title="AI, scheduling, interop"
-              imgUrl="/img/blog/titan-logo.jpeg"
-              webUrl="/blog/titan-case-study"
-              youtubeUrl="https://youtu.be/sy3YKRFyPII"
+              name="Rad AI"
+              title="AI, Radiology, interop"
+              imgUrl="/img/blog/radai-logo.jpeg"
+              webUrl="/blog/radai-case-study"
+              youtubeUrl="https://www.youtube.com/watch?v=N5ZocZhdPZ0"
             />
             <ProfileCard
-              name="Ensage Health"
-              title="Geriatrics, Value Based Care"
-              imgUrl="/img/blog/ensage.jpeg"
-              youtubeUrl="https://youtu.be/GIlmd7OMZ5g"
-              webUrl="/blog/ensage-case-study"
+              name="Develo"
+              title="Pediatrics, AI, Billing"
+              imgUrl="/img/blog/develo.jpeg"
+              youtubeUrl="https://www.youtube.com/watch?v=Jk5jSEiBYbQ"
+              webUrl="/blog/develo-case-study"
             />
           </CardContainer>
         </Section>
@@ -117,6 +117,56 @@ export default function CaseStudiesPage(): JSX.Element {
             ></iframe>
           </div>
         </Jumbotron>
+        <Section>
+          <CardContainer>
+            <ProfileCard
+              name="Chamber Cardio"
+              title="EHR integrations, workflow"
+              imgUrl="/img/blog/chamber-cardio-logo.jpeg"
+              webUrl="/blog/chamber-cardio-case-study"
+              youtubeUrl="https://youtu.be/8bsrKe6VmUs"
+            />
+            <ProfileCard
+              name="Summer Health"
+              title="AI, Pediatrics, Messaging"
+              imgUrl="/img/blog/summer-health.png"
+              webUrl="/blog/summer-case-study"
+              youtubeUrl="https://youtu.be/H2fJVYG8LvQ"
+            />
+            <ProfileCard
+              name="Flexpa"
+              title="Claims, Billing, Interop"
+              imgUrl="/img/blog/flexpa-logo.png"
+              youtubeUrl="https://youtu.be/DsdLq6DGi-0"
+              webUrl="/blog/flexpa-case-study"
+            />
+          </CardContainer>
+        </Section>
+        <Section>
+          <CardContainer>
+            <ProfileCard
+              name="Ensage Health"
+              title="Geriatrics, Value based care"
+              imgUrl="/img/blog/ensage.jpeg"
+              webUrl="/blog/ensage-case-study"
+              youtubeUrl="https://youtu.be/GIlmd7OMZ5g"
+            />
+            <ProfileCard
+              name="Codex"
+              title="Interop, Compliance"
+              imgUrl="/img/blog/codex-logo.jpeg"
+              webUrl="/blog/codex-and-the-power-of-g10"
+              youtubeUrl="https://youtu.be/ZCmGlio07GY"
+            />
+            <ProfileCard
+              name="Titan Intake"
+              title="AI, scheduling, interop"
+              imgUrl="/img/blog/titan-logo.jpeg"
+              webUrl="/blog/titan-case-study"
+              youtubeUrl="https://youtu.be/sy3YKRFyPII"
+            />
+          </CardContainer>
+        </Section>
       </Container>
     </Layout>
   );

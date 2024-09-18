@@ -10,13 +10,16 @@ import {
 } from '@medplum/fhirtypes';
 import { ContentType } from './contenttype';
 import { OperationOutcomeError } from './outcomes';
+import { PropertyType } from './types';
 import {
   ResourceWithCode,
+  addProfileToResource,
   arrayBufferToBase64,
   arrayBufferToHex,
   calculateAge,
   calculateAgeString,
   capitalize,
+  concatUrls,
   createReference,
   deepClone,
   deepEquals,
@@ -32,13 +35,18 @@ import {
   getExtensionValue,
   getIdentifier,
   getImageSrc,
+  getPathDifference,
+  getQueryString,
   getQuestionnaireAnswers,
   getReferenceString,
+  getWebSocketUrl,
+  isComplexTypeCode,
   isEmpty,
   isLowerCase,
   isPopulated,
   isProfileResource,
   isUUID,
+  isValidHostname,
   lazy,
   parseReference,
   preciseEquals,
@@ -50,6 +58,7 @@ import {
   resolveId,
   setCodeBySystem,
   setIdentifier,
+  sortStringArray,
   splitN,
   stringify,
 } from './utils';
@@ -153,6 +162,31 @@ describe('Core Utils', () => {
     expect(getDisplayString({ resourceType: 'Device', id: '123', deviceName: [] })).toEqual('Device/123');
     expect(getDisplayString({ resourceType: 'User', email: 'foo@example.com' } as User)).toEqual('foo@example.com');
     expect(getDisplayString({ resourceType: 'User', id: '123' } as User)).toEqual('User/123');
+    expect(getDisplayString({ resourceType: 'Bot', id: '123', code: 'console.log()' })).toEqual('Bot/123');
+    expect(
+      getDisplayString({
+        resourceType: 'AllergyIntolerance',
+        patient: { reference: 'Patient/123' },
+        code: { text: 'Peanut' },
+      })
+    ).toEqual('Peanut');
+    expect(
+      getDisplayString({
+        resourceType: 'AllergyIntolerance',
+        patient: { reference: 'Patient/123' },
+        code: { coding: [{ code: 'Peanut' }] },
+      })
+    ).toEqual('Peanut');
+    expect(
+      getDisplayString({
+        resourceType: 'MedicationRequest',
+        status: 'active',
+        intent: 'order',
+        subject: { reference: 'Patient/123' },
+        medicationCodeableConcept: { text: 'foo' },
+      })
+    ).toEqual('foo');
+    expect(getDisplayString({ resourceType: 'PractitionerRole', code: [{ text: 'foo' }] })).toEqual('foo');
   });
 
   const EMPTY = [true, false];
@@ -397,6 +431,44 @@ describe('Core Utils', () => {
     ).toMatchObject({
       q1: [{ valueString: 'xyz' }, { valueString: 'abc' }],
     });
+
+    // Test repeated groups
+    expect(
+      getAllQuestionnaireAnswers({
+        resourceType: 'QuestionnaireResponse',
+        status: 'completed',
+        item: [
+          {
+            linkId: 'group1',
+            item: [
+              {
+                linkId: 'q1',
+                answer: [
+                  {
+                    valueString: 'xyz',
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            linkId: 'group1',
+            item: [
+              {
+                linkId: 'q1',
+                answer: [
+                  {
+                    valueString: '123',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      })
+    ).toMatchObject({
+      q1: [{ valueString: 'xyz' }, { valueString: '123' }],
+    });
   });
 
   test('Get identifier', () => {
@@ -446,7 +518,16 @@ describe('Core Utils', () => {
     });
   });
 
-  test('Get extension value', () => {
+  test('Get extension undefined value', () => {
+    const resource: Patient = {
+      resourceType: 'Patient',
+      extension: [{ url: 'http://example.com' }],
+    };
+    expect(getExtensionValue(resource, 'http://example.com')).toBeUndefined();
+    expect(getExtensionValue(resource, 'http://example.com', 'key1')).toBeUndefined();
+  });
+
+  test('Get extension string value', () => {
     const resource: Patient = {
       resourceType: 'Patient',
       extension: [
@@ -464,6 +545,26 @@ describe('Core Utils', () => {
     };
     expect(getExtensionValue(resource, 'http://example.com')).toBe('xyz');
     expect(getExtensionValue(resource, 'http://example.com', 'key1')).toBe('value1');
+  });
+
+  test('Get extension dateTime value', () => {
+    const resource: Patient = {
+      resourceType: 'Patient',
+      extension: [
+        {
+          url: 'http://example.com',
+          valueString: 'xyz',
+          extension: [
+            {
+              url: 'key1',
+              valueDateTime: '2023-03-01T13:12:00-05:00',
+            },
+          ],
+        },
+      ],
+    };
+    expect(getExtensionValue(resource, 'http://example.com')).toBe('xyz');
+    expect(getExtensionValue(resource, 'http://example.com', 'key1')).toBe('2023-03-01T13:12:00-05:00');
   });
 
   test('Get extension object', () => {
@@ -635,6 +736,8 @@ describe('Core Utils', () => {
     const output = deepClone(input);
     expect(output).toEqual(input);
     expect(output).not.toBe(input);
+
+    expect(deepClone(undefined)).toBeUndefined();
   });
 
   test('Capitalize', () => {
@@ -650,6 +753,25 @@ describe('Core Utils', () => {
     expect(isLowerCase('a')).toEqual(true);
     expect(isLowerCase('A')).toEqual(false);
     expect(isLowerCase('3')).toEqual(false);
+  });
+
+  test('isComplexTypeCode', () => {
+    expect(isComplexTypeCode('url')).toEqual(false);
+    expect(isComplexTypeCode(PropertyType.SystemString)).toEqual(false);
+    expect(isComplexTypeCode('')).toEqual(false);
+  });
+
+  test('getPathDifference', () => {
+    expect(getPathDifference('a', 'b')).toEqual(undefined);
+    expect(getPathDifference('a', 'a')).toEqual(undefined);
+    expect(getPathDifference('A', 'A')).toEqual(undefined);
+    expect(getPathDifference('a.b', 'a')).toEqual(undefined);
+
+    expect(getPathDifference('a', 'a.b')).toEqual('b');
+    expect(getPathDifference('A.b', 'A.b.c.d')).toEqual('c.d');
+    expect(getPathDifference('Patient.extension', 'Patient.extension.extension.value[x]')).toEqual(
+      'extension.value[x]'
+    );
   });
 
   test('isUUID', () => {
@@ -1105,5 +1227,215 @@ describe('Core Utils', () => {
     // Call the lazy function for the second time, wrapped fn still only called once
     expect(lazyFn()).toBe('test result');
     expect(mockFn).toHaveBeenCalledTimes(1);
+  });
+
+  test('sortStringArray', () => {
+    expect(sortStringArray(['a', 'c', 'b'])).toEqual(['a', 'b', 'c']);
+
+    const code1 = '\u00e9\u0394'; // "éΔ"
+    const code2 = '\u0065\u0301\u0394'; // "éΔ" using Unicode combining marks
+    const code3 = '\u0065\u0394'; // "eΔ"
+    expect(sortStringArray([code1, code2, code3])).toEqual([code3, code1, code2]);
+  });
+
+  test('concatUrls -- Valid URLs', () => {
+    // String base path with no trailing slash, relative path
+    expect(concatUrls('https://foo.com', 'ws/subscriptions-r4')).toEqual('https://foo.com/ws/subscriptions-r4');
+    // String base path with no trailing slash, absolute path
+    expect(concatUrls('https://foo.com', '/ws/subscriptions-r4')).toEqual('https://foo.com/ws/subscriptions-r4');
+    // String base path with trailing slash, relative path
+    expect(concatUrls('https://foo.com/', 'ws/subscriptions-r4')).toEqual('https://foo.com/ws/subscriptions-r4');
+    // String base path with trailing slash, absolute path
+    expect(concatUrls('https://foo.com/', '/ws/subscriptions-r4')).toEqual('https://foo.com/ws/subscriptions-r4');
+    // String base path with path after domain and no trailing slash, relative path
+    expect(concatUrls('https://foo.com/foo/bar', 'ws/subscriptions-r4')).toEqual(
+      'https://foo.com/foo/bar/ws/subscriptions-r4'
+    );
+    // String base path with path after domain and no trailing slash, absolute path
+    expect(concatUrls('https://foo.com/foo/bar', '/ws/subscriptions-r4')).toEqual(
+      'https://foo.com/foo/bar/ws/subscriptions-r4'
+    );
+    // String base path with path after domain and WITH trailing slash, relative path
+    expect(concatUrls('https://foo.com/foo/bar/', 'ws/subscriptions-r4')).toEqual(
+      'https://foo.com/foo/bar/ws/subscriptions-r4'
+    );
+    // String base path with path after domain and WITH trailing slash, absolute path
+    expect(concatUrls('https://foo.com/foo/bar/', '/ws/subscriptions-r4')).toEqual(
+      'https://foo.com/foo/bar/ws/subscriptions-r4'
+    );
+    // URL base path with no trailing slash, relative path
+    expect(concatUrls(new URL('https://foo.com'), 'ws/subscriptions-r4')).toEqual(
+      'https://foo.com/ws/subscriptions-r4'
+    );
+    // URL base path with no trailing slash, absolute path
+    expect(concatUrls(new URL('https://foo.com'), '/ws/subscriptions-r4')).toEqual(
+      'https://foo.com/ws/subscriptions-r4'
+    );
+    // URL base path with trailing slash, relative path
+    expect(concatUrls(new URL('https://foo.com/'), 'ws/subscriptions-r4')).toEqual(
+      'https://foo.com/ws/subscriptions-r4'
+    );
+    // URL base path with trailing slash, absolute path
+    expect(concatUrls(new URL('https://foo.com/'), '/ws/subscriptions-r4')).toEqual(
+      'https://foo.com/ws/subscriptions-r4'
+    );
+    // URL base path with path after domain and no trailing slash, relative path
+    expect(concatUrls(new URL('https://foo.com/foo/bar'), 'ws/subscriptions-r4')).toEqual(
+      'https://foo.com/foo/bar/ws/subscriptions-r4'
+    );
+    // URL base path with path after domain and no trailing slash, absolute path
+    expect(concatUrls(new URL('https://foo.com/foo/bar'), '/ws/subscriptions-r4')).toEqual(
+      'https://foo.com/foo/bar/ws/subscriptions-r4'
+    );
+    // URL base path with path after domain and WITH trailing slash, relative path
+    expect(concatUrls(new URL('https://foo.com/foo/bar/'), 'ws/subscriptions-r4')).toEqual(
+      'https://foo.com/foo/bar/ws/subscriptions-r4'
+    );
+    // URL base path with path after domain and WITH trailing slash, absolute path
+    expect(concatUrls(new URL('https://foo.com/foo/bar/'), '/ws/subscriptions-r4')).toEqual(
+      'https://foo.com/foo/bar/ws/subscriptions-r4'
+    );
+    // Concatenating two full urls (return latter)
+    expect(concatUrls('https://foo.com/bar', 'https://bar.org/foo')).toEqual('https://bar.org/foo');
+  });
+
+  test('concatUrls -- Invalid URLs', () => {
+    expect(() => concatUrls('foo', '/bar')).toThrow();
+    expect(() => concatUrls('foo.com', '/bar')).toThrow();
+  });
+
+  test('getWebSocketUrl', () => {
+    // String base path with no trailing slash, relative path
+    expect(getWebSocketUrl('https://foo.com', 'ws/subscriptions-r4')).toEqual('wss://foo.com/ws/subscriptions-r4');
+    // String base path with no trailing slash, absolute path
+    expect(getWebSocketUrl('https://foo.com', '/ws/subscriptions-r4')).toEqual('wss://foo.com/ws/subscriptions-r4');
+    // String base path with trailing slash, relative path
+    expect(getWebSocketUrl('https://foo.com/', 'ws/subscriptions-r4')).toEqual('wss://foo.com/ws/subscriptions-r4');
+    // String base path with trailing slash, absolute path
+    expect(getWebSocketUrl('https://foo.com/', '/ws/subscriptions-r4')).toEqual('wss://foo.com/ws/subscriptions-r4');
+    // String base path with path after domain and no trailing slash, relative path
+    expect(getWebSocketUrl('https://foo.com/foo/bar', 'ws/subscriptions-r4')).toEqual(
+      'wss://foo.com/foo/bar/ws/subscriptions-r4'
+    );
+    // String base path with path after domain and no trailing slash, absolute path
+    expect(getWebSocketUrl('https://foo.com/foo/bar', '/ws/subscriptions-r4')).toEqual(
+      'wss://foo.com/foo/bar/ws/subscriptions-r4'
+    );
+    // String base path with path after domain and WITH trailing slash, relative path
+    expect(getWebSocketUrl('https://foo.com/foo/bar/', 'ws/subscriptions-r4')).toEqual(
+      'wss://foo.com/foo/bar/ws/subscriptions-r4'
+    );
+    // String base path with path after domain and WITH trailing slash, absolute path
+    expect(getWebSocketUrl('https://foo.com/foo/bar/', '/ws/subscriptions-r4')).toEqual(
+      'wss://foo.com/foo/bar/ws/subscriptions-r4'
+    );
+    // URL base path with no trailing slash, relative path
+    expect(getWebSocketUrl(new URL('https://foo.com'), 'ws/subscriptions-r4')).toEqual(
+      'wss://foo.com/ws/subscriptions-r4'
+    );
+    // URL base path with no trailing slash, absolute path
+    expect(getWebSocketUrl(new URL('https://foo.com'), '/ws/subscriptions-r4')).toEqual(
+      'wss://foo.com/ws/subscriptions-r4'
+    );
+    // URL base path with trailing slash, relative path
+    expect(getWebSocketUrl(new URL('https://foo.com/'), 'ws/subscriptions-r4')).toEqual(
+      'wss://foo.com/ws/subscriptions-r4'
+    );
+    // URL base path with trailing slash, absolute path
+    expect(getWebSocketUrl(new URL('https://foo.com/'), '/ws/subscriptions-r4')).toEqual(
+      'wss://foo.com/ws/subscriptions-r4'
+    );
+    // URL base path with path after domain and no trailing slash, relative path
+    expect(getWebSocketUrl(new URL('https://foo.com/foo/bar'), 'ws/subscriptions-r4')).toEqual(
+      'wss://foo.com/foo/bar/ws/subscriptions-r4'
+    );
+    // URL base path with path after domain and no trailing slash, absolute path
+    expect(getWebSocketUrl(new URL('https://foo.com/foo/bar'), '/ws/subscriptions-r4')).toEqual(
+      'wss://foo.com/foo/bar/ws/subscriptions-r4'
+    );
+    // URL base path with path after domain and WITH trailing slash, relative path
+    expect(getWebSocketUrl(new URL('https://foo.com/foo/bar/'), 'ws/subscriptions-r4')).toEqual(
+      'wss://foo.com/foo/bar/ws/subscriptions-r4'
+    );
+    // URL base path with path after domain and WITH trailing slash, absolute path
+    expect(getWebSocketUrl(new URL('https://foo.com/foo/bar/'), '/ws/subscriptions-r4')).toEqual(
+      'wss://foo.com/foo/bar/ws/subscriptions-r4'
+    );
+  });
+
+  test('getQueryString', () => {
+    expect(getQueryString('?bestEhr=medplum')).toEqual('bestEhr=medplum');
+    expect(
+      getQueryString([
+        ['bestEhr', 'medplum'],
+        ['foo', 'bar'],
+      ])
+    ).toEqual('bestEhr=medplum&foo=bar');
+    expect(getQueryString({ bestEhr: 'medplum', numberOne: true, medplumRanking: 1 })).toEqual(
+      'bestEhr=medplum&numberOne=true&medplumRanking=1'
+    );
+    expect(
+      getQueryString({ bestEhr: 'medplum', numberOne: true, medplumRanking: 1, betterThanMedplum: undefined })
+    ).toEqual('bestEhr=medplum&numberOne=true&medplumRanking=1');
+    expect(getQueryString(new URLSearchParams({ bestEhr: 'medplum', numberOne: 'true', medplumRanking: '1' }))).toEqual(
+      'bestEhr=medplum&numberOne=true&medplumRanking=1'
+    );
+    expect(getQueryString(undefined)).toEqual('');
+  });
+
+  test('isValidHostname', () => {
+    expect(isValidHostname('foo')).toEqual(true);
+    expect(isValidHostname('foo.com')).toEqual(true);
+    expect(isValidHostname('foo.bar.com')).toEqual(true);
+    expect(isValidHostname('foo.org')).toEqual(true);
+    expect(isValidHostname('foo.bar.co.uk')).toEqual(true);
+    expect(isValidHostname('localhost')).toEqual(true);
+    expect(isValidHostname('LOCALHOST')).toEqual(true);
+    expect(isValidHostname('foo-bar-baz')).toEqual(true);
+    expect(isValidHostname('foo_bar')).toEqual(true);
+    expect(isValidHostname('foobar123')).toEqual(true);
+
+    expect(isValidHostname('foo.com/bar')).toEqual(false);
+    expect(isValidHostname('https://foo.com')).toEqual(false);
+    expect(isValidHostname('foo_-bar_-')).toEqual(false);
+    expect(isValidHostname('foo | rm -rf /')).toEqual(false);
+  });
+});
+
+describe('addProfileToResource', () => {
+  test('add profile URL to resource w/o any profiles', async () => {
+    const profileUrl = 'http://example.com/patient-profile';
+    const patient: Patient = {
+      resourceType: 'Patient',
+      name: [{ given: ['Given'], family: 'Family' }],
+    };
+    addProfileToResource(patient, profileUrl);
+    expect(patient.meta?.profile?.length ?? -1).toEqual(1);
+    expect(patient.meta?.profile).toEqual(expect.arrayContaining([profileUrl]));
+  });
+
+  test('add profile URL to resource with empty profile array', async () => {
+    const profileUrl = 'http://example.com/patient-profile';
+    const patient: Patient = {
+      resourceType: 'Patient',
+      meta: { profile: [] },
+      name: [{ given: ['Given'], family: 'Family' }],
+    };
+    addProfileToResource(patient, profileUrl);
+    expect(patient.meta?.profile?.length ?? -1).toEqual(1);
+    expect(patient.meta?.profile).toEqual(expect.arrayContaining([profileUrl]));
+  });
+
+  test('add profile URL to resource with populated profile array', async () => {
+    const existingProfileUrl = 'http://example.com/existing-patient-profile';
+    const profileUrl = 'http://example.com/patient-profile';
+    const patient: Patient = {
+      resourceType: 'Patient',
+      meta: { profile: [existingProfileUrl] },
+      name: [{ given: ['Given'], family: 'Family' }],
+    };
+    addProfileToResource(patient, profileUrl);
+    expect(patient.meta?.profile?.length ?? -1).toEqual(2);
+    expect(patient.meta?.profile).toEqual(expect.arrayContaining([profileUrl, existingProfileUrl]));
   });
 });

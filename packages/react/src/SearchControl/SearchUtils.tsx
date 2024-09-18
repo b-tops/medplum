@@ -78,6 +78,7 @@ const operatorNames: Record<Operator, string> = {
   'not-in': 'not in',
   'of-type': 'of type',
   missing: 'missing',
+  present: 'present',
   identifier: 'identifier',
   iterate: 'iterate',
 };
@@ -548,6 +549,7 @@ function renderPropertyValue(resource: Resource, elementDefinition: InternalSche
 
   return (
     <ResourcePropertyDisplay
+      path={elementDefinition.path}
       property={elementDefinition}
       propertyType={propertyType}
       value={value}

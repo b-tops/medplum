@@ -10,7 +10,6 @@ import { simpleParser } from 'mailparser';
 import fetch from 'node-fetch';
 import { Readable } from 'stream';
 import request from 'supertest';
-
 import { initApp, shutdownApp } from '../app';
 import { registerNew } from '../auth/register';
 import { loadTestConfig } from '../config';
@@ -26,6 +25,7 @@ describe('Admin Invite', () => {
 
   beforeAll(async () => {
     const config = await loadTestConfig();
+    config.emailProvider = 'awsses';
     await withTestContext(() => initApp(app, config));
   });
 
@@ -685,7 +685,7 @@ describe('Admin Invite', () => {
         lastName: 'Jones',
         email: bobEmail,
       });
-    expect(res3.status).toBe(400);
+    expect(res3.status).toBe(409);
     expect(normalizeErrorString(res3.body)).toEqual('User is already a member of this project');
 
     // Invite Bob third time with "upsert = true" - should succeed
@@ -715,7 +715,7 @@ describe('Admin Invite', () => {
         upsert: true,
         membership: { profile: createReference(profile) },
       });
-    expect(res5.status).toBe(400);
+    expect(res5.status).toBe(409);
     expect(normalizeErrorString(res5.body)).toEqual(
       'User is already a member of this project with a different profile'
     );

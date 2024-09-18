@@ -13,9 +13,9 @@ import {
   NewProjectRequest,
   NewUserRequest,
 } from './client';
-import { mockFetch } from './client-test-utils';
+import { createFakeJwt, mockFetch, mockFetchResponse } from './client-test-utils';
 import { ContentType } from './contenttype';
-import { OperationOutcomeError, notFound, unauthorized } from './outcomes';
+import { OperationOutcomeError, accepted, allOk, forbidden, notFound, unauthorized } from './outcomes';
 import { MockAsyncClientStorage } from './storage';
 import { getDataType, isDataTypeLoaded, isProfileLoaded } from './typeschema/types';
 import { ProfileResource, createReference } from './utils';
@@ -1397,6 +1397,30 @@ describe('Client', () => {
     );
   });
 
+  test('Upsert resource', async () => {
+    const fetch = mockFetch(200, {});
+    const client = new MedplumClient({ fetch });
+    const result = await client.upsertResource(
+      {
+        resourceType: 'Patient',
+        identifier: [{ system: 'http://example.com/mrn', value: '24601' }],
+      },
+      'identifier=http://example.com/mrn|24601'
+    );
+    expect(result).toBeDefined();
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.medplum.com/fhir/R4/Patient?identifier=http%3A%2F%2Fexample.com%2Fmrn%7C24601',
+      expect.objectContaining({
+        method: 'PUT',
+        headers: {
+          Accept: DEFAULT_ACCEPT,
+          'Content-Type': ContentType.FHIR_JSON,
+          'X-Medplum': 'extended',
+        },
+      })
+    );
+  });
+
   test('Update resource validation', async () => {
     const fetch = mockFetch(200, {});
     const client = new MedplumClient({ fetch });
@@ -1437,6 +1461,27 @@ describe('Client', () => {
   test('Create attachment', async () => {
     const fetch = mockFetch(200, {});
     const client = new MedplumClient({ fetch });
+    const result = await client.createAttachment({
+      data: 'Hello world',
+      contentType: ContentType.TEXT,
+    });
+    expect(result).toBeDefined();
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.medplum.com/fhir/R4/Binary',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          Accept: DEFAULT_ACCEPT,
+          'Content-Type': ContentType.TEXT,
+          'X-Medplum': 'extended',
+        },
+      })
+    );
+  });
+
+  test('Create attachment (deprecated legacy version)', async () => {
+    const fetch = mockFetch(200, {});
+    const client = new MedplumClient({ fetch });
     const result = await client.createAttachment('Hello world', undefined, ContentType.TEXT);
     expect(result).toBeDefined();
     expect(fetch).toHaveBeenCalledWith(
@@ -1455,7 +1500,10 @@ describe('Client', () => {
   test('Create binary', async () => {
     const fetch = mockFetch(200, {});
     const client = new MedplumClient({ fetch });
-    const result = await client.createBinary('Hello world', undefined, ContentType.TEXT);
+    const result = await client.createBinary({
+      data: 'Hello world',
+      contentType: ContentType.TEXT,
+    });
     expect(result).toBeDefined();
     expect(fetch).toHaveBeenCalledWith(
       'https://api.medplum.com/fhir/R4/Binary',
@@ -1471,6 +1519,46 @@ describe('Client', () => {
   });
 
   test('Create binary with filename', async () => {
+    const fetch = mockFetch(200, {});
+    const client = new MedplumClient({ fetch });
+    const result = await client.createBinary({
+      data: 'Hello world',
+      contentType: ContentType.TEXT,
+      filename: 'hello.txt',
+    });
+    expect(result).toBeDefined();
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.medplum.com/fhir/R4/Binary?_filename=hello.txt',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          Accept: DEFAULT_ACCEPT,
+          'Content-Type': ContentType.TEXT,
+          'X-Medplum': 'extended',
+        },
+      })
+    );
+  });
+
+  test('Create binary (deprecated legacy version)', async () => {
+    const fetch = mockFetch(200, {});
+    const client = new MedplumClient({ fetch });
+    const result = await client.createBinary('Hello world', undefined, ContentType.TEXT);
+    expect(result).toBeDefined();
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.medplum.com/fhir/R4/Binary',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          Accept: DEFAULT_ACCEPT,
+          'Content-Type': ContentType.TEXT,
+          'X-Medplum': 'extended',
+        },
+      })
+    );
+  });
+
+  test('Create binary with filename (deprecated legacy version)', async () => {
     const fetch = mockFetch(200, {});
     const client = new MedplumClient({ fetch });
     const result = await client.createBinary('Hello world', 'hello.txt', ContentType.TEXT);
@@ -1526,7 +1614,7 @@ describe('Client', () => {
     const fetch = mockFetch(200, {});
     const client = new MedplumClient({ fetch });
     try {
-      await client.createPdf({ content: ['Hello world'] });
+      await client.createPdf({ docDefinition: { content: ['Hello world'] } });
     } catch (err) {
       expect((err as Error).message).toEqual('PDF creation not enabled');
     }
@@ -1713,7 +1801,7 @@ describe('Client', () => {
     const result2 = await client.executeBot(bot.identifier?.[0] as Identifier, {});
     expect(result2).toBeDefined();
     expect(fetch).toHaveBeenCalledWith(
-      'https://api.medplum.com/fhir/R4/Bot/$execute?identifier=https://example.com|123',
+      'https://api.medplum.com/fhir/R4/Bot/$execute?identifier=https%3A%2F%2Fexample.com%7C123',
       expect.objectContaining({})
     );
   });
@@ -2287,18 +2375,7 @@ describe('Client', () => {
 
   test('Auto batch single request error', async () => {
     const fetch = mockFetch(404, notFound);
-    (fetch as unknown as jest.Mock).mockImplementation(() => ({
-      status: 404,
-      json: () => notFound,
-      headers: {
-        get(name: string): string | undefined {
-          return {
-            'content-type': ContentType.FHIR_JSON,
-          }[name];
-        },
-      },
-    }));
-    const medplum = new MedplumClient({ fetch: fetch, autoBatchTime: 100 });
+    const medplum = new MedplumClient({ fetch, autoBatchTime: 100 });
 
     try {
       await medplum.readResource('Patient', 'xyz-not-found');
@@ -2440,90 +2517,38 @@ describe('Client', () => {
       let count = 0;
       fetch = jest.fn(async (url) => {
         if (url.includes('/$export?_since=200')) {
-          return {
-            status: 200,
-            headers: { get: () => ContentType.FHIR_JSON },
-            json: jest.fn(async () => {
-              return {
-                resourceType: 'OperationOutcome',
-                id: 'accepted',
-                issue: [
-                  {
-                    severity: 'information',
-                    code: 'informational',
-                    details: {
-                      text: 'Accepted',
-                    },
-                  },
-                ],
-              };
-            }),
-          };
+          return mockFetchResponse(200, accepted('bulkdata/id/status'), { 'content-location': 'bulkdata/id/status' });
         }
 
         if (url.includes('/$export')) {
-          return {
-            status: 202,
-            json: jest.fn(async () => {
-              return {
-                resourceType: 'OperationOutcome',
-                id: 'accepted',
-                issue: [
-                  {
-                    severity: 'information',
-                    code: 'informational',
-                    details: {
-                      text: 'Accepted',
-                    },
-                  },
-                ],
-              };
-            }),
-            headers: {
-              get(name: string): string | undefined {
-                return {
-                  'content-type': ContentType.FHIR_JSON,
-                  'content-location': 'bulkdata/id/status',
-                }[name];
-              },
-            },
-          };
+          return mockFetchResponse(202, accepted('bulkdata/id/status'), { 'content-location': 'bulkdata/id/status' });
         }
 
         if (url.includes('bulkdata/id/status')) {
           if (count < 1) {
             count++;
-            return {
-              status: 202,
-              json: jest.fn(async () => {
-                return {};
-              }),
-            };
+            return mockFetchResponse(202, {});
           }
         }
 
-        return {
-          status: 200,
-          headers: { get: () => ContentType.FHIR_JSON },
-          json: jest.fn(async () => ({
-            transactionTime: '2023-05-18T22:55:31.280Z',
-            request: 'https://api.medplum.com/fhir/R4/$export?_type=Observation',
-            requiresAccessToken: false,
-            output: [
-              {
-                type: 'ProjectMembership',
-                url: 'https://api.medplum.com/storage/TEST',
-              },
-            ],
-            error: [],
-          })),
-        };
+        return mockFetchResponse(200, {
+          transactionTime: '2023-05-18T22:55:31.280Z',
+          request: 'https://api.medplum.com/fhir/R4/$export?_type=Observation',
+          requiresAccessToken: false,
+          output: [
+            {
+              type: 'ProjectMembership',
+              url: 'https://api.medplum.com/storage/TEST',
+            },
+          ],
+          error: [],
+        });
       });
     });
 
     test('System Level', async () => {
       const medplum = new MedplumClient({ fetch });
-      const response = await medplum.bulkExport();
+      const response = await medplum.bulkExport(undefined, undefined, undefined, { pollStatusOnAccepted: true });
       expect(fetch).toHaveBeenCalledWith(
         expect.stringContaining('/$export'),
         expect.objectContaining({
@@ -2541,7 +2566,10 @@ describe('Client', () => {
 
     test('with optional params type, since, options', async () => {
       const medplum = new MedplumClient({ fetch });
-      const response = await medplum.bulkExport('', 'Observation', 'testdate', { headers: { test: 'test' } });
+      const response = await medplum.bulkExport(undefined, 'Observation', 'testdate', {
+        headers: { test: 'test' },
+        pollStatusOnAccepted: true,
+      });
       expect(fetch).toHaveBeenCalledWith(
         expect.stringContaining('/$export?_type=Observation&_since=testdate'),
         expect.any(Object)
@@ -2554,7 +2582,9 @@ describe('Client', () => {
     test('Group of Patients', async () => {
       const medplum = new MedplumClient({ fetch });
       const groupId = randomUUID();
-      const response = await medplum.bulkExport(`Group/${groupId}`);
+      const response = await medplum.bulkExport(`Group/${groupId}`, undefined, undefined, {
+        pollStatusOnAccepted: true,
+      });
       expect(fetch).toHaveBeenCalledWith(expect.stringContaining(`/Group/${groupId}/$export`), expect.any(Object));
       expect(fetch).toHaveBeenCalledWith(expect.stringContaining('bulkdata/id/status'), expect.any(Object));
       expect(fetch).toHaveBeenCalledTimes(3);
@@ -2563,37 +2593,15 @@ describe('Client', () => {
 
     test('All Patient', async () => {
       const medplum = new MedplumClient({ fetch });
-      const response = await medplum.bulkExport(`Patient`);
-      expect(fetch).toHaveBeenCalledWith(expect.stringContaining(`/Patient/$export`), expect.any(Object));
+      const response = await medplum.bulkExport('Patient', undefined, undefined, { pollStatusOnAccepted: true });
+      expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/Patient/$export'), expect.any(Object));
       expect(fetch).toHaveBeenCalledWith(expect.stringContaining('bulkdata/id/status'), expect.any(Object));
       expect(fetch).toHaveBeenCalledTimes(3);
       expect(response.output?.length).toBe(1);
     });
 
     test('Kick off missing content-location', async () => {
-      const fetch = jest.fn(async () => {
-        return {
-          status: 202,
-          json: jest.fn(async () => {
-            return {
-              resourceType: 'OperationOutcome',
-              id: 'accepted',
-              issue: [
-                {
-                  severity: 'information',
-                  code: 'informational',
-                  details: {
-                    text: 'Accepted',
-                  },
-                },
-              ],
-            };
-          }),
-          headers: {
-            get: (key: string) => (key === 'content-type' ? ContentType.FHIR_JSON : null),
-          },
-        };
-      });
+      const fetch = mockFetch(202, allOk);
       const medplum = new MedplumClient({ fetch });
       const response = await medplum.bulkExport();
 
@@ -2620,11 +2628,91 @@ describe('Client', () => {
         expect((err as Error).message).toBe('Not found');
       }
     });
+
+    test('Poll after token refresh', async () => {
+      const clientId = randomUUID();
+      const clientSecret = randomUUID();
+      const statusUrl = 'status-' + randomUUID();
+      const locationUrl = 'location-' + randomUUID();
+
+      const mockTokens = {
+        access_token: createFakeJwt({ client_id: clientId, login_id: '123' }),
+        refresh_token: createFakeJwt({ client_id: clientId }),
+        profile: { reference: 'Patient/123' },
+      };
+
+      const mockMe = {
+        project: { resourceType: 'Project', id: '123' },
+        membership: { resourceType: 'ProjectMembership', id: '123' },
+        profile: { resouceType: 'Practitioner', id: '123' },
+        config: { resourceType: 'UserConfiguration', id: '123' },
+        accessPolicy: { resourceType: 'AccessPolicy', id: '123' },
+      };
+
+      let count = 0;
+
+      const mockFetch = async (url: string, options: any): Promise<any> => {
+        count++;
+        switch (count) {
+          case 1:
+            // First, handle the initial startClientLogin client credentials flow
+            expect(options.method).toBe('POST');
+            expect(url).toBe('https://api.medplum.com/oauth2/token');
+            return mockFetchResponse(200, mockTokens);
+          case 2:
+            // MedplumClient will automatically fetch the user profile after token refresh
+            expect(options.method).toBe('GET');
+            expect(url).toBe('https://api.medplum.com/auth/me');
+            return mockFetchResponse(200, mockMe);
+          case 3:
+            // Next, handle the initial bulk export - mock an expired token response
+            expect(options.method).toBe('POST');
+            expect(url).toBe('https://api.medplum.com/fhir/R4/$export');
+            return mockFetchResponse(401, forbidden);
+          case 4:
+            // Now MedplumClient will try to automatically refresh the token
+            expect(options.method).toBe('POST');
+            expect(url).toBe('https://api.medplum.com/oauth2/token');
+            return mockFetchResponse(200, mockTokens);
+          case 5:
+            // And then MedplumClient will automatically fetch the user profile again
+            expect(options.method).toBe('GET');
+            expect(url).toBe('https://api.medplum.com/auth/me');
+            return mockFetchResponse(200, mockMe);
+          case 6:
+            // Ok, whew, we are refreshed, so we can finally get the bulk export
+            // However, the bulk export isn't "done", so return "Accepted"
+            expect(options.method).toBe('POST');
+            expect(url).toBe('https://api.medplum.com/fhir/R4/$export');
+            return mockFetchResponse(202, accepted(statusUrl));
+          case 7:
+            // Report status complete, and send the location of the bulk export
+            expect(options.method).toBe('GET');
+            expect(url).toBe('https://api.medplum.com/' + statusUrl);
+            return mockFetchResponse(201, {}, { location: locationUrl });
+          case 8:
+            // What a journey! Finally, we can get the contents of the bulk export
+            expect(options.method).toBe('GET');
+            expect(url).toBe('https://api.medplum.com/' + locationUrl);
+            return mockFetchResponse(200, { resourceType: 'Bundle' });
+        }
+        throw new Error('Unexpected fetch call: ' + url);
+      };
+
+      const medplum = new MedplumClient({ fetch: mockFetch });
+      await medplum.startClientLogin(clientId, clientSecret);
+      const result = await medplum.bulkExport(undefined, undefined, undefined, {
+        pollStatusOnAccepted: true,
+        followRedirectOnCreated: true,
+      });
+      expect(result).toMatchObject({ resourceType: 'Bundle' });
+    });
   });
 
   describe('Downloading resources', () => {
     const baseUrl = 'https://api.medplum.com/';
     const fhirUrlPath = 'fhir/R4/';
+    const accessToken = 'fake';
     let fetch: FetchLike;
     let client: MedplumClient;
 
@@ -2633,6 +2721,7 @@ describe('Client', () => {
         text: () => Promise.resolve(url),
       }));
       client = new MedplumClient({ fetch, baseUrl, fhirUrlPath });
+      client.setAccessToken(accessToken);
     });
 
     test('Downloading resources via URL', async () => {
@@ -2641,7 +2730,8 @@ describe('Client', () => {
         baseUrl,
         expect.objectContaining({
           headers: {
-            Accept: DEFAULT_ACCEPT,
+            Accept: '*/*',
+            Authorization: `Bearer ${accessToken}`,
             'X-Medplum': 'extended',
           },
         })
@@ -2655,7 +2745,8 @@ describe('Client', () => {
         `${baseUrl}${fhirUrlPath}Binary/fake-id`,
         expect.objectContaining({
           headers: {
-            Accept: DEFAULT_ACCEPT,
+            Accept: '*/*',
+            Authorization: `Bearer ${accessToken}`,
             'X-Medplum': 'extended',
           },
         })
@@ -2665,23 +2756,63 @@ describe('Client', () => {
   });
 
   describe('Media', () => {
-    test('Upload Media', async () => {
+    test('Create Media', async () => {
       const fetch = mockFetch(200, {});
+      fetch.mockImplementationOnce(async () => mockFetchResponse(201, { resourceType: 'Media', id: '123' }));
+      fetch.mockImplementationOnce(async () =>
+        mockFetchResponse(201, { resourceType: 'Binary', id: '456', url: 'Binary/456' })
+      );
+      fetch.mockImplementationOnce(async () => mockFetchResponse(200, { resourceType: 'Media', id: '123' }));
+
       const client = new MedplumClient({ fetch });
-      const media = await client.uploadMedia('Hello world', 'text/plain', 'hello.txt');
+      const media = await client.createMedia({
+        data: 'Hello world',
+        contentType: 'text/plain',
+        filename: 'hello.txt',
+      });
       expect(media).toBeDefined();
-      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(fetch).toHaveBeenCalledTimes(3);
 
       const calls = fetch.mock.calls;
-      expect(calls).toHaveLength(2);
-      expect(calls[0][0]).toEqual('https://api.medplum.com/fhir/R4/Binary?_filename=hello.txt');
-      expect(calls[1][0]).toEqual('https://api.medplum.com/fhir/R4/Media');
-      expect(JSON.parse(calls[1][1].body)).toMatchObject({
+      expect(calls).toHaveLength(3);
+      expect(calls[0][0]).toEqual('https://api.medplum.com/fhir/R4/Media');
+      expect(calls[1][0]).toEqual('https://api.medplum.com/fhir/R4/Binary?_filename=hello.txt');
+      expect(calls[2][0]).toEqual('https://api.medplum.com/fhir/R4/Media/123');
+      expect(JSON.parse(calls[2][1].body)).toMatchObject({
         resourceType: 'Media',
         status: 'completed',
         content: {
           contentType: 'text/plain',
-          url: 'Binary/undefined',
+          url: 'Binary/456',
+          title: 'hello.txt',
+        },
+      });
+    });
+
+    test('Upload Media', async () => {
+      const fetch = mockFetch(200, {});
+      fetch.mockImplementationOnce(async () => mockFetchResponse(201, { resourceType: 'Media', id: '123' }));
+      fetch.mockImplementationOnce(async () =>
+        mockFetchResponse(201, { resourceType: 'Binary', id: '456', url: 'Binary/456' })
+      );
+      fetch.mockImplementationOnce(async () => mockFetchResponse(200, { resourceType: 'Media', id: '123' }));
+
+      const client = new MedplumClient({ fetch });
+      const media = await client.uploadMedia('Hello world', 'text/plain', 'hello.txt');
+      expect(media).toBeDefined();
+      expect(fetch).toHaveBeenCalledTimes(3);
+
+      const calls = fetch.mock.calls;
+      expect(calls).toHaveLength(3);
+      expect(calls[0][0]).toEqual('https://api.medplum.com/fhir/R4/Media');
+      expect(calls[1][0]).toEqual('https://api.medplum.com/fhir/R4/Binary?_filename=hello.txt');
+      expect(calls[2][0]).toEqual('https://api.medplum.com/fhir/R4/Media/123');
+      expect(JSON.parse(calls[2][1].body)).toMatchObject({
+        resourceType: 'Media',
+        status: 'completed',
+        content: {
+          contentType: 'text/plain',
+          url: 'Binary/456',
           title: 'hello.txt',
         },
       });
@@ -2693,69 +2824,42 @@ describe('Client', () => {
       const fetch = jest.fn();
 
       // First time, return 202 Accepted with Content-Location
-      fetch.mockImplementationOnce(async () => ({
-        ok: true,
-        status: 202,
-        headers: {
-          get: (key: string) => {
-            if (key.toLowerCase() === 'content-location') {
-              return 'https://example.com/content-location/1';
-            }
-            if (key.toLowerCase() === 'content-type') {
-              return ContentType.FHIR_JSON;
-            }
-            return null;
-          },
-        },
-        json: async () => ({}),
-      }));
+      fetch.mockImplementationOnce(async () =>
+        mockFetchResponse(
+          202,
+          {},
+          {
+            'content-location': 'https://example.com/content-location/1',
+          }
+        )
+      );
 
       // Second time, return 202 Accepted with Content-Location
-      fetch.mockImplementationOnce(async () => ({
-        ok: true,
-        status: 202,
-        headers: {
-          get: (key: string) => {
-            if (key.toLowerCase() === 'content-location') {
-              return 'https://example.com/content-location/1';
-            }
-            if (key.toLowerCase() === 'content-type') {
-              return ContentType.FHIR_JSON;
-            }
-            return null;
-          },
-        },
-        json: async () => ({}),
-      }));
+      fetch.mockImplementationOnce(async () =>
+        mockFetchResponse(
+          202,
+          {},
+          {
+            'content-location': 'https://example.com/content-location/1',
+          }
+        )
+      );
 
       // Third time, return 201 Created with Location
-      fetch.mockImplementationOnce(async () => ({
-        ok: true,
-        status: 201,
-        headers: {
-          get: (key: string) => {
-            if (key.toLowerCase() === 'location') {
-              return 'https://example.com/location/1';
-            }
-            if (key.toLowerCase() === 'content-type') {
-              return ContentType.FHIR_JSON;
-            }
-            return null;
-          },
-        },
-        json: async () => ({}),
-      }));
+      fetch.mockImplementationOnce(async () =>
+        mockFetchResponse(201, {}, { location: 'https://example.com/location/1' })
+      );
 
-      // Fourth time, return 200 with JSON
-      fetch.mockImplementationOnce(async () => ({
-        ok: true,
-        status: 201,
-        headers: { get: () => ContentType.FHIR_JSON },
-        json: async () => ({ resourceType: 'Patient' }),
-      }));
+      // Fourth time, return 201 with JSON
+      fetch.mockImplementationOnce(async () => mockFetchResponse(201, { resourceType: 'Patient' }));
 
       const client = new MedplumClient({ fetch });
-      const response = await client.startAsyncRequest('/test', { method: 'POST', body: '{}' });
+      const response = await client.startAsyncRequest('/test', {
+        method: 'POST',
+        body: '{}',
+        pollStatusOnAccepted: true,
+        followRedirectOnCreated: true,
+      });
       expect(fetch).toHaveBeenCalledTimes(4);
       expect((response as any).resourceType).toEqual('Patient');
     });
@@ -2827,10 +2931,6 @@ function createPdf(
     pdfDoc.on('error', reject);
     pdfDoc.end();
   });
-}
-
-function createFakeJwt(claims: Record<string, string | number>): string {
-  return 'header.' + window.btoa(JSON.stringify(claims)) + '.signature';
 }
 
 function fail(message: string): never {

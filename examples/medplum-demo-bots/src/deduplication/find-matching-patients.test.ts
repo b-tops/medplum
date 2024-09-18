@@ -7,7 +7,7 @@ import {
   indexStructureDefinitionBundle,
   resolveId,
 } from '@medplum/core';
-import { readJson } from '@medplum/definitions';
+import { SEARCH_PARAMETER_BUNDLE_FILES, readJson } from '@medplum/definitions';
 import { Bundle, List, Patient, SearchParameter } from '@medplum/fhirtypes';
 import { MockClient } from '@medplum/mock';
 import { handler } from './find-matching-patients';
@@ -27,8 +27,9 @@ describe('Link Patient', async () => {
   beforeAll(() => {
     indexStructureDefinitionBundle(readJson('fhir/r4/profiles-types.json') as Bundle);
     indexStructureDefinitionBundle(readJson('fhir/r4/profiles-resources.json') as Bundle);
-    indexSearchParameterBundle(readJson('fhir/r4/search-parameters.json') as Bundle<SearchParameter>);
-    indexSearchParameterBundle(readJson('fhir/r4/search-parameters-medplum.json') as Bundle<SearchParameter>);
+    for (const filename of SEARCH_PARAMETER_BUNDLE_FILES) {
+      indexSearchParameterBundle(readJson(filename) as Bundle<SearchParameter>);
+    }
   });
 
   // start-block createBatchData
@@ -42,7 +43,12 @@ describe('Link Patient', async () => {
     // Read the patient. The `medplum` mock client has already been pre-populated with test data in `beforeEach`
     const patients = await medplum.searchResources('Patient', { given: 'Alex' });
 
-    await handler(medplum, { input: patients?.[0] as Patient, contentType: ContentType.FHIR_JSON, secrets: {} });
+    await handler(medplum, {
+      bot: { reference: 'Bot/123' },
+      input: patients?.[0] as Patient,
+      contentType: ContentType.FHIR_JSON,
+      secrets: {},
+    });
 
     // We expect two risk assessments to be created for the two candidate matches
     const riskAssessments = await medplum.searchResources('RiskAssessment');
@@ -68,7 +74,12 @@ describe('Link Patient', async () => {
     await medplum.updateResource(doNotMatchAlex);
     await medplum.updateResource(doNotMatchAlexis);
 
-    await handler(medplum, { input: alexSmith, contentType: ContentType.FHIR_JSON, secrets: {} });
+    await handler(medplum, {
+      bot: { reference: 'Bot/123' },
+      input: alexSmith,
+      contentType: ContentType.FHIR_JSON,
+      secrets: {},
+    });
 
     const riskAssessment = await medplum.searchResources('RiskAssessment');
     expect(riskAssessment.length).toBe(1);
